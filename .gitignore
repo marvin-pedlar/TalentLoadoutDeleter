@@ -1,0 +1,15 @@
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Lua bytecode
+*.luac
+
+# Logs
+*.log
+
+# Local IDE state
+.vscode/launch.json
+.idea/

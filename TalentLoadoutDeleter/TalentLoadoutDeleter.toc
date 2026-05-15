@@ -1,0 +1,11 @@
+## Interface: 120005
+## Title: TalentLoadoutDeleter
+## Notes: One-click + bulk delete of saved talent loadouts.
+## Author: Marvin Pedlar
+## Version: 0.1.0
+## IconTexture: Interface\Icons\Trade_Engineering
+
+src\Data.lua
+src\Hooks.lua
+src\Window.lua
+src\Core.lua
