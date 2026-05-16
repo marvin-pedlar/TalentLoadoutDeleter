@@ -71,4 +71,16 @@ Describe "Window.lua structure" {
     Assert-Match $script:windowSource 'No deletable loadouts' `
       "Expected empty-state string"
   }
+
+  It "installs the OnLoadoutsChanged callback" {
+    Assert-Match $script:windowSource 'OnLoadoutsChanged\s*=\s*function' `
+      "Expected ns.OnLoadoutsChanged assignment"
+  }
+
+  It "installs the OnSpecChanged callback that hides the window" {
+    Assert-Match $script:windowSource 'OnSpecChanged\s*=\s*function' `
+      "Expected ns.OnSpecChanged assignment"
+    Assert-Match $script:windowSource 'OnSpecChanged\s*=\s*function[\s\S]{0,200}Hide' `
+      "Expected the callback to Hide the frame"
+  }
 }

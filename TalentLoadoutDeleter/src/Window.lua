@@ -215,3 +215,15 @@ function Window.Toggle()
 end
 
 ns.Window = Window
+
+ns.OnLoadoutsChanged = function()
+  if frame and frame:IsShown() then
+    Window.Refresh()
+  end
+end
+
+ns.OnSpecChanged = function()
+  if frame and frame:IsShown() then
+    frame:Hide()
+  end
+end
