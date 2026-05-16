@@ -7,6 +7,8 @@ ns = ns or {}
 local Window = {}
 ns.state = ns.state or { isBulkDeleting = false }
 local frame
+local updateFooter  -- forward-declared; defined below so createFrame closures
+                    -- (selectAll OnClick) capture the local upvalue, not _G.
 
 local function createFrame()
   local f = CreateFrame("Frame", "TalentLoadoutDeleterWindow",
@@ -24,10 +26,29 @@ local function createFrame()
     f.TitleText:SetText("Talent Loadouts")
   end
 
+  local header = CreateFrame("Frame", nil, f)
+  header:SetHeight(20)
+  header:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -32)
+  header:SetPoint("TOPRIGHT", f, "TOPRIGHT", -32, -32)
+
+  local selectAll = CreateFrame("CheckButton", nil, header, "UICheckButtonTemplate")
+  selectAll:SetSize(20, 20)
+  selectAll:SetPoint("LEFT", header, "LEFT", 0, 0)
+  f.selectAll = selectAll
+
+  local selectAllLabel = header:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  selectAllLabel:SetPoint("LEFT", selectAll, "RIGHT", 4, 0)
+  selectAllLabel:SetText("Select All")
+
+  local countLabel = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  countLabel:SetPoint("RIGHT", header, "RIGHT", 0, 0)
+  countLabel:SetText("0 of 0 selected")
+  f.countLabel = countLabel
+
   -- Scrollable row container.
   local scroll = CreateFrame("ScrollFrame", f:GetName() .. "Scroll",
     f, "UIPanelScrollFrameTemplate")
-  scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -36)
+  scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -56)
   scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32, 48)
 
   local content = CreateFrame("Frame", nil, scroll)
@@ -61,6 +82,16 @@ local function createFrame()
     Window.Refresh()
   end)
 
+  selectAll:SetScript("OnClick", function(self)
+    local checked = self:GetChecked()
+    for _, r in ipairs(f.scrollRows) do
+      if r:IsShown() and not r.isActive then
+        r.check:SetChecked(checked)
+      end
+    end
+    updateFooter(f)
+  end)
+
   f:Hide()
   return f
 end
@@ -72,15 +103,20 @@ local function currentSpecName()
   return name or ""
 end
 
-local function updateFooter(f)
+updateFooter = function(f)
   local selected = 0
+  local total = 0
   for _, r in ipairs(f.scrollRows) do
-    if r:IsShown() and r.check:GetChecked() and not r.isActive then
-      selected = selected + 1
+    if r:IsShown() and not r.isActive then
+      total = total + 1
+      if r.check:GetChecked() then selected = selected + 1 end
     end
   end
   f.footer:SetText(("Delete Selected (%d)"):format(selected))
   if selected > 0 then f.footer:Enable() else f.footer:Disable() end
+  if f.countLabel then
+    f.countLabel:SetText(("%d of %d selected"):format(selected, total))
+  end
 end
 
 local ROW_HEIGHT = 24

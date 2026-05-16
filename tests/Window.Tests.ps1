@@ -61,4 +61,9 @@ Describe "Window.lua structure" {
     Assert-Match $script:windowSource 'isBulkDeleting\s*=\s*false' `
       "Expected isBulkDeleting flag reset to false"
   }
+
+  It "has a Select All checkbox" {
+    Assert-Match $script:windowSource 'Select all|Select All' `
+      "Expected a 'Select All' label in the header"
+  }
 }
