@@ -59,36 +59,33 @@ function Hooks.Install()
   end)
   anchorManageButton(button)
 
-  -- Inline [X] injection: hook the DropdownLoadSystemMixin directly
-  -- (not the instance — instance lookup goes through the mixin via
-  -- __index, and hooksecurefunc on an instance with mixin-derived
-  -- methods can be flaky). Filter to our specific instance inside.
-  -- After our hook installs, trigger one refresh so our wrap takes
-  -- effect immediately (Blizzard only re-runs UpdateSelectionOptions
-  -- on events like TRAIT_CONFIG_LIST_UPDATED that may have already
-  -- passed before our addon loaded).
+  -- Inline [X] injection. Blizzard's Mixin() copies the mixin's methods
+  -- onto each frame instance, so hooking the global mixin doesn't
+  -- intercept calls on the existing LoadSystem instance. We must hook
+  -- the instance directly. Also: SetSelectionOptions may have run
+  -- before our addon loaded, so wrap any pre-existing menuGenerator
+  -- immediately without triggering UpdateSelectionOptions (which would
+  -- error if possibleSelections happens to be nil).
   local LoadSystem = PlayerSpellsFrame.TalentsFrame.LoadSystem
-  hooksecurefunc(DropdownLoadSystemMixin, "UpdateSelectionOptions", function(self)
-    if self ~= LoadSystem then return end
-    local origGenerator = self.Dropdown.menuGenerator
-    if not origGenerator or origGenerator._tld_wrapped then return end
+  print("|cff00ff00TLD|r: Hooks.Install — LoadSystem =", LoadSystem and "frame" or "nil",
+        "; existing menuGenerator =", LoadSystem.Dropdown and type(LoadSystem.Dropdown.menuGenerator) or "no Dropdown",
+        "; possibleSelections =", LoadSystem.possibleSelections and "set" or "nil")
 
+  local function buildWrappedGenerator(origGenerator)
     local wrapped = function(dropdown, rootDescription)
       origGenerator(dropdown, rootDescription)
 
+      local seen = 0
       for _, desc in rootDescription:EnumerateElementDescriptions() do
         local configID = desc:GetData()
+        seen = seen + 1
         if type(configID) == "number" then
+          print("|cff00ff00TLD|r: adding initializer for configID", configID)
           desc:AddInitializer(function(button, description, menu)
+            print("|cff00ff00TLD|r: initializer running for configID", configID, "; button =", button and button:GetName() or "anonymous")
             local activeID = C_ClassTalents.GetActiveConfigID()
             local isActive = (configID == activeID)
 
-            -- Cache one X-button per pooled menu button to avoid creating
-            -- a fresh frame on every menu open (the compositor does NOT
-            -- manage children created via plain CreateFrame — only those
-            -- attached via button:AttachTexture / AttachFontString are
-            -- pool-aware). Reusing the cached frame bounds the number of
-            -- X buttons to the size of Blizzard's menu button pool.
             local x = button._tldX
             if not x then
               x = CreateFrame("Button", nil, button)
@@ -134,18 +131,31 @@ function Hooks.Install()
           end)
         end
       end
+      print("|cff00ff00TLD|r: enumerated", seen, "descs total")
     end
     wrapped._tld_wrapped = true
-    self.Dropdown:SetupMenu(wrapped)
+    return wrapped
+  end
+
+  -- 1) Hook the instance method for any future UpdateSelectionOptions calls
+  --    (e.g. after TRAIT_CONFIG_LIST_UPDATED fires).
+  hooksecurefunc(LoadSystem, "UpdateSelectionOptions", function(self)
+    print("|cff00ff00TLD|r: hook fired (UpdateSelectionOptions)")
+    local orig = self.Dropdown.menuGenerator
+    if not orig or orig._tld_wrapped then return end
+    self.Dropdown:SetupMenu(buildWrappedGenerator(orig))
+    print("|cff00ff00TLD|r: wrapped generator installed via hook")
   end)
 
-  -- Trigger one refresh immediately so the wrap is installed even if
-  -- Blizzard's events (TRAIT_CONFIG_LIST_UPDATED etc.) fired before
-  -- our addon loaded. Only safe to call if possibleSelections is set,
-  -- otherwise UpdateSelectionOptions's generator would crash on an
-  -- ipairs of nil when the dropdown opens.
-  if LoadSystem.possibleSelections then
-    LoadSystem:UpdateSelectionOptions()
+  -- 2) Wrap any pre-existing menuGenerator that Blizzard set before our
+  --    hook installed (common case: SetSelectionOptions ran during the
+  --    talents frame's initial setup before our ADDON_LOADED fired).
+  local dropdown = LoadSystem.Dropdown
+  if dropdown and dropdown.menuGenerator and not dropdown.menuGenerator._tld_wrapped then
+    dropdown:SetupMenu(buildWrappedGenerator(dropdown.menuGenerator))
+    print("|cff00ff00TLD|r: wrapped pre-existing menuGenerator inline")
+  else
+    print("|cff00ff00TLD|r: no pre-existing menuGenerator to wrap (waiting for hook)")
   end
 end
 
