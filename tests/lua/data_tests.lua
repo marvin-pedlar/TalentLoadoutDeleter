@@ -60,4 +60,19 @@ t.test("profession loadout is filtered out", function()
   t.assert_eq(rows[1].name, "Raid", "name of surviving row")
 end)
 
+t.test("generic loadout (type 3) is filtered out", function()
+  stub_blizzard(
+    {301, 302},
+    {
+      [301] = { ID = 301, name = "Raid",         type = 1, treeIDs = {} },
+      [302] = { ID = 302, name = "Dragonflight", type = 3, treeIDs = {} },
+    },
+    nil
+  )
+  local Data = load_data()
+  local rows = Data.GetLoadouts(62, nil)
+  t.assert_len(rows, 1, "only the combat row should survive")
+  t.assert_eq(rows[1].id, 301, "id of surviving row")
+end)
+
 t.run()
