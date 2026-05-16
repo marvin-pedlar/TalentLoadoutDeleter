@@ -82,63 +82,72 @@ function Hooks.Install()
     wrapped = function(dropdown, rootDescription)
       origGenerator(dropdown, rootDescription)
 
-      local seen = 0
       for _, desc in rootDescription:EnumerateElementDescriptions() do
         local configID = desc:GetData()
-        seen = seen + 1
-        if type(configID) == "number" then
-          print("|cff00ff00TLD|r: adding initializer for configID", configID)
-          desc:AddInitializer(function(button, description, menu)
-            print("|cff00ff00TLD|r: initializer running for configID", configID, "; button =", button and button:GetName() or "anonymous")
-            local activeID = C_ClassTalents.GetActiveConfigID()
-            local isActive = (configID == activeID)
+        -- Add an initializer for EVERY desc, not just loadout rows.
+        -- The menu button-widget pool reuses buttons across renders, so a
+        -- button that rendered a loadout last time may render a sentinel
+        -- this time — and our cached `button._tldX` would still be
+        -- visible from the prior render. The initializer below hides the
+        -- cached X on non-loadout rows.
+        desc:AddInitializer(function(button, description, menu)
+          local STARTER_BUILD = Constants and Constants.TraitConsts
+            and Constants.TraitConsts.STARTER_BUILD_TRAIT_CONFIG_ID
+          local isLoadout = type(configID) == "number"
+            and configID ~= STARTER_BUILD
+          local x = button._tldX
 
-            local x = button._tldX
-            if not x then
-              x = CreateFrame("Button", nil, button)
-              x:SetSize(16, 16)
-              x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
-              button._tldX = x
-            end
-            x:ClearAllPoints()
-            x:SetPoint("RIGHT", button, "RIGHT", -22, 0)
-            local tex = x:GetNormalTexture()
+          if not isLoadout then
+            if x then x:Hide() end
+            return
+          end
 
-            if isActive then
-              tex:SetDesaturated(true)
-              tex:SetVertexColor(0.5, 0.5, 0.5)
-              x:SetScript("OnEnter", function(self)
+          local activeID = C_ClassTalents.GetActiveConfigID()
+          local isActive = (configID == activeID)
+
+          if not x then
+            x = CreateFrame("Button", nil, button)
+            x:SetSize(16, 16)
+            x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+            button._tldX = x
+          end
+          x:ClearAllPoints()
+          x:SetPoint("RIGHT", button, "RIGHT", -22, 0)
+          local tex = x:GetNormalTexture()
+
+          if isActive then
+            tex:SetDesaturated(true)
+            tex:SetVertexColor(0.5, 0.5, 0.5)
+            x:SetScript("OnEnter", function(self)
+              GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+              GameTooltip:SetText("Cannot delete the active loadout — switch first.")
+              GameTooltip:Show()
+            end)
+            x:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            x:SetScript("OnClick", nil)
+          else
+            tex:SetDesaturated(false)
+            tex:SetVertexColor(1, 1, 1)
+            x:SetScript("OnEnter", function(self)
+              GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+              GameTooltip:SetText("Shift-click to delete this loadout.")
+              GameTooltip:Show()
+            end)
+            x:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            x:SetScript("OnClick", function(self)
+              if not IsShiftKeyDown() then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText("Cannot delete the active loadout — switch first.")
+                GameTooltip:SetText("Hold Shift and click to delete.")
                 GameTooltip:Show()
-              end)
-              x:SetScript("OnLeave", function() GameTooltip:Hide() end)
-              x:SetScript("OnClick", nil)
-            else
-              tex:SetDesaturated(false)
-              tex:SetVertexColor(1, 1, 1)
-              x:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText("Shift-click to delete this loadout.")
-                GameTooltip:Show()
-              end)
-              x:SetScript("OnLeave", function() GameTooltip:Hide() end)
-              x:SetScript("OnClick", function(self)
-                if not IsShiftKeyDown() then
-                  GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                  GameTooltip:SetText("Hold Shift and click to delete.")
-                  GameTooltip:Show()
-                  return
-                end
-                C_ClassTalents.DeleteConfig(configID)
-                menu:Close()
-              end)
-            end
-            x:Show()
-          end)
-        end
+                return
+              end
+              C_ClassTalents.DeleteConfig(configID)
+              menu:Close()
+            end)
+          end
+          x:Show()
+        end)
       end
-      print("|cff00ff00TLD|r: enumerated", seen, "descs total")
     end
     isOurWrapper[wrapped] = true
     return wrapped
