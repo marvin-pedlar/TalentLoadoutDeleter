@@ -90,4 +90,25 @@ t.test("nil GetConfigInfo result is skipped", function()
   t.assert_eq(rows[1].name, "Raid", "valid row preserved")
 end)
 
+t.test("active row pinned first, others alphabetical case-insensitive", function()
+  stub_blizzard(
+    {501, 502, 503, 504},
+    {
+      [501] = { ID = 501, name = "zeta",    type = 1, treeIDs = {} },
+      [502] = { ID = 502, name = "Active!", type = 1, treeIDs = {} },
+      [503] = { ID = 503, name = "alpha",   type = 1, treeIDs = {} },
+      [504] = { ID = 504, name = "Beta",    type = 1, treeIDs = {} },
+    },
+    502  -- 502 is the active loadout
+  )
+  local Data = load_data()
+  local rows = Data.GetLoadouts(62, 502)
+  t.assert_len(rows, 4, "all four rows present")
+  t.assert_eq(rows[1].id, 502, "active pinned at position 1")
+  t.assert_eq(rows[1].isActive, true, "active flagged")
+  t.assert_eq(rows[2].name, "alpha", "next: alpha (case-insensitive)")
+  t.assert_eq(rows[3].name, "Beta", "then Beta")
+  t.assert_eq(rows[4].name, "zeta", "then zeta")
+end)
+
 t.run()

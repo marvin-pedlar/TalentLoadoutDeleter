@@ -20,6 +20,14 @@ function Data.GetLoadouts(specID, activeConfigID)
       })
     end
   end
+
+  table.sort(rows, function(a, b)
+    if a.isActive ~= b.isActive then
+      return a.isActive  -- active goes first
+    end
+    return string.lower(a.name) < string.lower(b.name)
+  end)
+
   return rows
 end
 
