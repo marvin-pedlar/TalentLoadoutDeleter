@@ -21,16 +21,24 @@ local function createManageButton(parent)
 end
 
 local function anchorManageButton(button)
-  -- The talent loadout selector is at .LoadSystem (a Frame inheriting
-  -- DropdownLoadSystemTemplate). The inner button is LoadSystem.Dropdown.
-  -- Anchor relative to the outer LoadSystem so we sit next to the widget
-  -- the user clicks, not nested inside it.
-  local loadSystem = PlayerSpellsFrame
-    and PlayerSpellsFrame.TalentsFrame
-    and PlayerSpellsFrame.TalentsFrame.LoadSystem
-  if loadSystem then
-    button:ClearAllPoints()
-    button:SetPoint("LEFT", loadSystem, "RIGHT", 6, 0)
+  -- Blizzard's SearchBox is anchored LEFT to LoadSystem.RIGHT + 20 (per
+  -- Blizzard_ClassTalentsFrame.xml line 236), so we'd overlap it if we
+  -- anchored next to LoadSystem itself. Prefer anchoring past the
+  -- SearchBox; fall back to LoadSystem with a wide offset if SearchBox
+  -- isn't available for some reason.
+  local tf = PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame
+  if not tf then
+    button:Hide()
+    return
+  end
+  local searchBox = tf.SearchBox
+  local loadSystem = tf.LoadSystem
+  button:ClearAllPoints()
+  if searchBox then
+    button:SetPoint("LEFT", searchBox, "RIGHT", 8, 0)
+    button:Show()
+  elseif loadSystem then
+    button:SetPoint("LEFT", loadSystem, "RIGHT", 220, 0)
     button:Show()
   else
     button:Hide()
@@ -51,11 +59,17 @@ function Hooks.Install()
   end)
   anchorManageButton(button)
 
-  -- Inline [X] injection: hook the LoadSystem's UpdateSelectionOptions
-  -- and wrap its menuGenerator so each loadout radio gets an [X] initializer.
-  -- The compositor releases attached children when the menu closes.
+  -- Inline [X] injection: hook the DropdownLoadSystemMixin directly
+  -- (not the instance — instance lookup goes through the mixin via
+  -- __index, and hooksecurefunc on an instance with mixin-derived
+  -- methods can be flaky). Filter to our specific instance inside.
+  -- After our hook installs, trigger one refresh so our wrap takes
+  -- effect immediately (Blizzard only re-runs UpdateSelectionOptions
+  -- on events like TRAIT_CONFIG_LIST_UPDATED that may have already
+  -- passed before our addon loaded).
   local LoadSystem = PlayerSpellsFrame.TalentsFrame.LoadSystem
-  hooksecurefunc(LoadSystem, "UpdateSelectionOptions", function(self)
+  hooksecurefunc(DropdownLoadSystemMixin, "UpdateSelectionOptions", function(self)
+    if self ~= LoadSystem then return end
     local origGenerator = self.Dropdown.menuGenerator
     if not origGenerator or origGenerator._tld_wrapped then return end
 
@@ -124,6 +138,15 @@ function Hooks.Install()
     wrapped._tld_wrapped = true
     self.Dropdown:SetupMenu(wrapped)
   end)
+
+  -- Trigger one refresh immediately so the wrap is installed even if
+  -- Blizzard's events (TRAIT_CONFIG_LIST_UPDATED etc.) fired before
+  -- our addon loaded. Only safe to call if possibleSelections is set,
+  -- otherwise UpdateSelectionOptions's generator would crash on an
+  -- ipairs of nil when the dropdown opens.
+  if LoadSystem.possibleSelections then
+    LoadSystem:UpdateSelectionOptions()
+  end
 end
 
 ns.Hooks = Hooks

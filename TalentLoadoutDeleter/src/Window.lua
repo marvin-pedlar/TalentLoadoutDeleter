@@ -15,6 +15,9 @@ local function createFrame()
     UIParent, "BasicFrameTemplateWithInset")
   f:SetSize(380, 480)
   f:SetPoint("TOPRIGHT", PlayerSpellsFrame or UIParent, "TOPLEFT", -4, 0)
+  -- PlayerSpellsFrame is on HIGH strata; we want to float above its
+  -- fullscreen-ish background, so put us on DIALOG.
+  f:SetFrameStrata("DIALOG")
   f:SetMovable(true)
   f:EnableMouse(true)
   f:RegisterForDrag("LeftButton")
