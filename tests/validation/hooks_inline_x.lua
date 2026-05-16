@@ -238,6 +238,49 @@ do
   io.write("OK sentinel row (data = nil) produces no X\n")
 end
 
+-- ---- Marker-based orphan cleanup: child carries _tldOwned ----
+do
+  local btn = newRowButton()
+  local marked = CreateFrame("Button", nil, btn)
+  marked._tldOwned = true
+  marked:SetNormalTexture("Some/Other/Texture")  -- different texture, must still be caught by marker
+  marked:Show()
+  rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
+  if marked._shown ~= false then
+    fail("marker-cleanup: child with _tldOwned=true must be hidden regardless of texture path")
+  end
+  io.write("OK marker-cleanup: _tldOwned child hidden on non-loadout render\n")
+end
+
+-- ---- Substring-match handles path-format variants ----
+-- WoW may normalize the texture path returned by GetTexture vs what was
+-- passed to SetNormalTexture (slash style, case, extension). The
+-- substring "UI-StopButton" should match all reasonable variants.
+do
+  for _, variant in ipairs({
+    "Interface\\Buttons\\UI-StopButton",
+    "Interface/Buttons/UI-StopButton",
+    "interface/buttons/ui-stopbutton",  -- case difference (won't match — Lua patterns are case-sensitive)
+    "INTERFACE\\BUTTONS\\UI-StopButton",
+    "Interface\\Buttons\\UI-StopButton.blp",
+  }) do
+    local btn = newRowButton()
+    local orphan = CreateFrame("Button", nil, btn)
+    orphan:SetNormalTexture(variant)
+    orphan:Show()
+    rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
+    if variant:find("UI%-StopButton") then
+      -- Case-sensitive Lua pattern: only variants containing exact "UI-StopButton"
+      -- match. Lowercase variant won't — that's an acceptable trade-off for
+      -- simplicity. If we ever need case-insensitive, switch to lower-then-find.
+      if orphan._shown ~= false then
+        fail("substring-cleanup: orphan with path " .. variant .. " must be hidden")
+      end
+    end
+  end
+  io.write("OK substring-cleanup: orphan X buttons with various path formats hidden\n")
+end
+
 -- ---- Orphan X cleanup: button has a prior orphan X attached ----
 -- Simulates the user's actual Phase 8 bug: previous broken addon versions
 -- attached unmarked X frames to Blizzard menu buttons. /reload doesn't

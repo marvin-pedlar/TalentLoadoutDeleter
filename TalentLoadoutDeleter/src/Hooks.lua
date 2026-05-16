@@ -99,18 +99,27 @@ function Hooks.Install()
           -- Hide ALL prior X buttons attached to this menu button. Blizzard
           -- pools menu buttons across renders (and across /reload — the
           -- Blizzard_Menu addon stays loaded), so orphans from earlier
-          -- code paths or earlier addon versions can persist. We scan by
-          -- texture, not just by our cache field, so unmarked orphans
-          -- from prior broken deploys get cleaned up too.
+          -- code paths or earlier addon versions can persist. Two signals:
+          --   1) child._tldOwned (set by our current code on every X we
+          --      create — exact, reliable).
+          --   2) NormalTexture path contains "UI-StopButton" (catches
+          --      unmarked orphans from older addon versions, robust
+          --      against in-game path normalization that may differ from
+          --      the literal we passed to SetNormalTexture).
           local children = { button:GetChildren() }
           for _, child in ipairs(children) do
-            local getTex = child.GetNormalTexture
-            if getTex then
-              local tex = getTex(child)
-              if tex and tex.GetTexture and tex:GetTexture() == "Interface\\Buttons\\UI-StopButton" then
-                child:Hide()
+            local shouldHide = child._tldOwned == true
+            if not shouldHide then
+              local getTex = child.GetNormalTexture
+              if getTex then
+                local tex = getTex(child)
+                local path = tex and tex.GetTexture and tex:GetTexture()
+                if type(path) == "string" and path:find("UI%-StopButton") then
+                  shouldHide = true
+                end
               end
             end
+            if shouldHide then child:Hide() end
           end
           local x = button._tldX
 
@@ -125,6 +134,7 @@ function Hooks.Install()
             x = CreateFrame("Button", nil, button)
             x:SetSize(16, 16)
             x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+            x._tldOwned = true  -- reliable signal for the orphan scan above
             button._tldX = x
           end
           x:ClearAllPoints()
