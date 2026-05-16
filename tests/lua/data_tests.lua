@@ -111,4 +111,25 @@ t.test("active row pinned first, others alphabetical case-insensitive", function
   t.assert_eq(rows[4].name, "zeta", "then zeta")
 end)
 
+t.test("no active config: all rows alphabetical, none isActive", function()
+  stub_blizzard(
+    {601, 602, 603},
+    {
+      [601] = { ID = 601, name = "charlie", type = 1, treeIDs = {} },
+      [602] = { ID = 602, name = "alpha",   type = 1, treeIDs = {} },
+      [603] = { ID = 603, name = "bravo",   type = 1, treeIDs = {} },
+    },
+    nil
+  )
+  local Data = load_data()
+  local rows = Data.GetLoadouts(62, nil)
+  t.assert_len(rows, 3, "all three rows present")
+  t.assert_eq(rows[1].name, "alpha", "alpha first")
+  t.assert_eq(rows[2].name, "bravo", "bravo second")
+  t.assert_eq(rows[3].name, "charlie", "charlie third")
+  t.assert_eq(rows[1].isActive, false, "none flagged active")
+  t.assert_eq(rows[2].isActive, false, "none flagged active")
+  t.assert_eq(rows[3].isActive, false, "none flagged active")
+end)
+
 t.run()
