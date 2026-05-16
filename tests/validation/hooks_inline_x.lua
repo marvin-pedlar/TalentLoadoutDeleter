@@ -16,6 +16,10 @@ local function fail(msg)
   os.exit(1)
 end
 
+-- Lua 5.4 (harness) removed global `unpack`; WoW Lua 5.1 has both. Shim
+-- so the GetChildren stub's varargs return works under either version.
+unpack = unpack or table.unpack
+
 -- ---- Blizzard stubs ----
 
 function hooksecurefunc(t, name, fn)
@@ -32,7 +36,10 @@ local function makeFrame(name, fields)
   frameSerial = frameSerial + 1
   local f = fields or {}
   f._name = name or ("anon" .. frameSerial)
+  f._children = {}
   function f:GetName() return self._name end
+  function f:GetChildren() return unpack(self._children) end
+  function f:GetNumChildren() return #self._children end
   function f:SetText() end
   function f:SetSize(w, h) self._w, self._h = w, h end
   function f:SetScript(name_, fn)
@@ -44,15 +51,16 @@ local function makeFrame(name, fields)
   function f:Show() self._shown = true end
   function f:Hide() self._shown = false end
   function f:IsShown() return self._shown end
-  function f:SetNormalTexture()
+  function f:SetNormalTexture(path)
     self._normalTex = {
-      _desat = false, _vColor = nil,
+      _desat = false, _vColor = nil, _texPath = path,
       SetDesaturated = function(self_, v) self_._desat = v end,
       SetVertexColor = function(self_, r, g, b) self_._vColor = { r, g, b } end,
+      GetTexture = function(self_) return self_._texPath end,
     }
   end
   function f:GetNormalTexture()
-    if not self._normalTex then self:SetNormalTexture() end
+    if not self._normalTex then self:SetNormalTexture(nil) end
     return self._normalTex
   end
   return f
@@ -62,6 +70,9 @@ local createdButtons = {}
 CreateFrame = function(kind, name, parent, template)
   local btn = makeFrame(name)
   table.insert(createdButtons, btn)
+  if parent and parent._children then
+    table.insert(parent._children, btn)
+  end
   return btn
 end
 IsShiftKeyDown = function() return false end
@@ -225,6 +236,42 @@ do
   rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
   if btn._tldX then fail("sentinel row must NOT create an X (data is not numeric)") end
   io.write("OK sentinel row (data = nil) produces no X\n")
+end
+
+-- ---- Orphan X cleanup: button has a prior orphan X attached ----
+-- Simulates the user's actual Phase 8 bug: previous broken addon versions
+-- attached unmarked X frames to Blizzard menu buttons. /reload doesn't
+-- unload Blizzard_Menu's button pool, so the orphans persist. Our new
+-- initializer must scan-by-texture and hide them.
+do
+  local btn = newRowButton()
+  -- Pre-attach an "orphan" X from a previous broken session: same
+  -- texture, same parent, but NOT tracked via button._tldX.
+  local orphan = CreateFrame("Button", nil, btn)
+  orphan:SetSize(16, 16)
+  orphan:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+  orphan:Show()
+  assert(orphan._shown == true, "orphan should start visible")
+  assert(#btn._children == 1 and btn._children[1] == orphan, "orphan should be a child of btn")
+
+  -- Now render a SENTINEL desc on this button. The initializer must scan
+  -- the children, find the orphan by texture, and hide it.
+  rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
+  if orphan._shown ~= false then
+    fail("orphan-cleanup: unmarked orphan X (with UI-StopButton texture) must be hidden when the button renders a sentinel row")
+  end
+  io.write("OK orphan-cleanup: unmarked orphan X hidden on sentinel render\n")
+
+  -- And render a LOADOUT on the same button: orphan still hidden, new X created.
+  orphan:Show()  -- re-show the orphan to test the loadout path
+  rootDesc.children[1]._initializers[1](btn, rootDesc.children[1], nil)
+  if orphan._shown ~= false then
+    fail("orphan-cleanup: orphan must be hidden even when rendering a loadout (we replace it with our cached one)")
+  end
+  if not btn._tldX or btn._tldX._shown ~= true then
+    fail("orphan-cleanup: new cached X must still be created on loadout render")
+  end
+  io.write("OK orphan-cleanup: orphan hidden + new cached X shown on loadout render\n")
 end
 
 -- ---- Button-pool reuse: button that rendered a loadout now renders a sentinel ----

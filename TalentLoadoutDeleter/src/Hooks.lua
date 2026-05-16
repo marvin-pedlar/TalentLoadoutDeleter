@@ -95,10 +95,26 @@ function Hooks.Install()
             and Constants.TraitConsts.STARTER_BUILD_TRAIT_CONFIG_ID
           local isLoadout = type(configID) == "number"
             and configID ~= STARTER_BUILD
+
+          -- Hide ALL prior X buttons attached to this menu button. Blizzard
+          -- pools menu buttons across renders (and across /reload — the
+          -- Blizzard_Menu addon stays loaded), so orphans from earlier
+          -- code paths or earlier addon versions can persist. We scan by
+          -- texture, not just by our cache field, so unmarked orphans
+          -- from prior broken deploys get cleaned up too.
+          local children = { button:GetChildren() }
+          for _, child in ipairs(children) do
+            local getTex = child.GetNormalTexture
+            if getTex then
+              local tex = getTex(child)
+              if tex and tex.GetTexture and tex:GetTexture() == "Interface\\Buttons\\UI-StopButton" then
+                child:Hide()
+              end
+            end
+          end
           local x = button._tldX
 
           if not isLoadout then
-            if x then x:Hide() end
             return
           end
 
