@@ -57,6 +57,12 @@ local function createFrame()
   f.scrollContent = content
   f.scrollRows = {}
 
+  local empty = scroll:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  empty:SetPoint("CENTER", scroll, "CENTER", 0, 0)
+  empty:SetText("No deletable loadouts for this spec.")
+  empty:Hide()
+  f.emptyMessage = empty
+
   local footer = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
   footer:SetSize(340, 28)
   footer:SetPoint("BOTTOM", f, "BOTTOM", 0, 12)
@@ -186,6 +192,12 @@ function Window.Refresh()
   local rows = (ns.Data and ns.Data.GetLoadouts and specID)
     and ns.Data.GetLoadouts(specID, activeID)
     or {}
+
+  if #rows == 0 then
+    if frame.emptyMessage then frame.emptyMessage:Show() end
+  else
+    if frame.emptyMessage then frame.emptyMessage:Hide() end
+  end
 
   renderRows(frame.scrollContent, rows, frame.scrollRows)
 end

@@ -66,4 +66,9 @@ Describe "Window.lua structure" {
     Assert-Match $script:windowSource 'Select all|Select All' `
       "Expected a 'Select All' label in the header"
   }
+
+  It "shows an empty-state message when no rows" {
+    Assert-Match $script:windowSource 'No deletable loadouts' `
+      "Expected empty-state string"
+  }
 }
