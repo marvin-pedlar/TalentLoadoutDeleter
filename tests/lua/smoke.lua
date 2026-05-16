@@ -1,6 +1,7 @@
--- Smoke test: verifies test_runner.lua loads and runs a passing test + a
--- failing test that the runner correctly reports. Used to validate the
--- harness wiring before any real Data.lua tests are added.
+-- Smoke test: verifies test_runner.lua loads and runs two passing tests.
+-- Validates the harness wiring before any real Data.lua tests are added.
+-- (Failure-path coverage is exercised by the deploy-gate verification in
+-- plan Task 0.5, not by this file.)
 
 local script_dir = arg[0]:match("(.*[/\\])") or "./"
 package.path = script_dir .. "?.lua;" .. package.path
