@@ -16,6 +16,7 @@ local dispatcher = CreateFrame("Frame", "TalentLoadoutDeleterDispatcher")
 dispatcher:RegisterEvent("ADDON_LOADED")
 dispatcher:RegisterEvent("TRAIT_CONFIG_LIST_UPDATED")
 dispatcher:RegisterEvent("TRAIT_CONFIG_DELETED")
+dispatcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 
 dispatcher:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" then
@@ -30,6 +31,10 @@ dispatcher:SetScript("OnEvent", function(_, event, arg1)
   elseif event == "TRAIT_CONFIG_DELETED" then
     if not TLD.state.isBulkDeleting and TLD.OnLoadoutsChanged then
       TLD.OnLoadoutsChanged()
+    end
+  elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
+    if TLD.OnSpecChanged then
+      TLD.OnSpecChanged()
     end
   end
 end)

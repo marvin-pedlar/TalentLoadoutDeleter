@@ -42,4 +42,14 @@ Describe "Core.lua structure" {
     Assert-Match $script:coreSource 'TRAIT_CONFIG_DELETED[\s\S]*isBulkDeleting' `
       "Expected TRAIT_CONFIG_DELETED to consult isBulkDeleting"
   }
+
+  It "registers PLAYER_SPECIALIZATION_CHANGED" {
+    Assert-Match $script:coreSource 'RegisterEvent\s*\(\s*"PLAYER_SPECIALIZATION_CHANGED"' `
+      "Expected PLAYER_SPECIALIZATION_CHANGED registration"
+  }
+
+  It "delegates spec change to TLD.OnSpecChanged" {
+    Assert-Match $script:coreSource 'PLAYER_SPECIALIZATION_CHANGED[\s\S]*OnSpecChanged' `
+      "Expected OnSpecChanged delegate"
+  }
 }
