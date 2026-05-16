@@ -32,4 +32,14 @@ Describe "Core.lua structure" {
     Assert-Match $script:coreSource 'TRAIT_CONFIG_LIST_UPDATED[\s\S]*listReady\s*=\s*true' `
       "Expected listReady to be set true on TRAIT_CONFIG_LIST_UPDATED"
   }
+
+  It "registers TRAIT_CONFIG_DELETED" {
+    Assert-Match $script:coreSource 'RegisterEvent\s*\(\s*"TRAIT_CONFIG_DELETED"' `
+      "Expected TRAIT_CONFIG_DELETED registration"
+  }
+
+  It "suppresses refresh during bulk delete" {
+    Assert-Match $script:coreSource 'TRAIT_CONFIG_DELETED[\s\S]*isBulkDeleting' `
+      "Expected TRAIT_CONFIG_DELETED to consult isBulkDeleting"
+  }
 }
