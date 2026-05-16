@@ -7,6 +7,11 @@ ns = ns or {}
 local Hooks = {}
 local installed = false
 
+-- Weak-keyed set of functions we've produced as menuGenerator wrappers.
+-- Lua functions are NOT tables — `wrapped._tld_wrapped = true` and the
+-- corresponding read would both error. Using a side table avoids that.
+local isOurWrapper = setmetatable({}, { __mode = "k" })
+
 local function createManageButton(parent)
   local button = CreateFrame("Button", "TalentLoadoutDeleterManageButton",
     parent, "UIPanelButtonTemplate")
@@ -72,7 +77,9 @@ function Hooks.Install()
         "; possibleSelections =", LoadSystem.possibleSelections and "set" or "nil")
 
   local function buildWrappedGenerator(origGenerator)
-    local wrapped = function(dropdown, rootDescription)
+    if isOurWrapper[origGenerator] then return origGenerator end
+    local wrapped
+    wrapped = function(dropdown, rootDescription)
       origGenerator(dropdown, rootDescription)
 
       local seen = 0
@@ -133,7 +140,7 @@ function Hooks.Install()
       end
       print("|cff00ff00TLD|r: enumerated", seen, "descs total")
     end
-    wrapped._tld_wrapped = true
+    isOurWrapper[wrapped] = true
     return wrapped
   end
 
@@ -142,7 +149,7 @@ function Hooks.Install()
   hooksecurefunc(LoadSystem, "UpdateSelectionOptions", function(self)
     print("|cff00ff00TLD|r: hook fired (UpdateSelectionOptions)")
     local orig = self.Dropdown.menuGenerator
-    if not orig or orig._tld_wrapped then return end
+    if not orig or isOurWrapper[orig] then return end
     self.Dropdown:SetupMenu(buildWrappedGenerator(orig))
     print("|cff00ff00TLD|r: wrapped generator installed via hook")
   end)
@@ -151,7 +158,7 @@ function Hooks.Install()
   --    hook installed (common case: SetSelectionOptions ran during the
   --    talents frame's initial setup before our ADDON_LOADED fired).
   local dropdown = LoadSystem.Dropdown
-  if dropdown and dropdown.menuGenerator and not dropdown.menuGenerator._tld_wrapped then
+  if dropdown and dropdown.menuGenerator and not isOurWrapper[dropdown.menuGenerator] then
     dropdown:SetupMenu(buildWrappedGenerator(dropdown.menuGenerator))
     print("|cff00ff00TLD|r: wrapped pre-existing menuGenerator inline")
   else
