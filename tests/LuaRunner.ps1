@@ -2,6 +2,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 function Get-LuaExe {
+  # Refresh PATH from the registry (Machine + User) before probing so we
+  # find interpreters installed after the current shell session started.
+  $machinePath = [System.Environment]::GetEnvironmentVariable("Path","Machine")
+  $userPath = [System.Environment]::GetEnvironmentVariable("Path","User")
+  $env:Path = "$machinePath;$userPath"
+
   $cmd = Get-Command lua -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
   $cmd = Get-Command lua54 -ErrorAction SilentlyContinue
