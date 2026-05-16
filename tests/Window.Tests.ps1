@@ -34,4 +34,14 @@ Describe "Window.lua structure" {
     Assert-Match $script:windowSource 'GetSpecializationInfo' `
       "Expected GetSpecializationInfo for title text"
   }
+
+  It "renders loadout rows via Data.GetLoadouts" {
+    Assert-Match $script:windowSource 'ns\.Data\.GetLoadouts' `
+      "Expected the window to consume the Data module"
+  }
+
+  It "uses a scroll surface (ScrollFrame or ScrollBox)" {
+    Assert-Match $script:windowSource 'CreateFrame\(\s*"ScrollFrame"|WowScrollBoxList' `
+      "Expected ScrollFrame or WowScrollBoxList"
+  }
 }

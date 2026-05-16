@@ -23,8 +23,67 @@ local function createFrame()
     f.TitleText:SetText("Talent Loadouts")
   end
 
+  -- Scrollable row container.
+  local scroll = CreateFrame("ScrollFrame", f:GetName() .. "Scroll",
+    f, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -36)
+  scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32, 48)
+
+  local content = CreateFrame("Frame", nil, scroll)
+  content:SetSize(340, 1)  -- height adjusted per refresh
+  scroll:SetScrollChild(content)
+  f.scrollContent = content
+  f.scrollRows = {}
+
   f:Hide()
   return f
+end
+
+local ROW_HEIGHT = 24
+
+local function renderRows(content, rows, savedRowFrames)
+  -- Reuse existing row frames; create more as needed.
+  for i = #savedRowFrames + 1, #rows do
+    local r = CreateFrame("Frame", nil, content)
+    r:SetHeight(ROW_HEIGHT)
+    r:SetPoint("LEFT", content, "LEFT", 0, 0)
+    r:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+
+    r.check = CreateFrame("CheckButton", nil, r, "UICheckButtonTemplate")
+    r.check:SetSize(20, 20)
+    r.check:SetPoint("LEFT", r, "LEFT", 0, 0)
+
+    r.label = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    r.label:SetPoint("LEFT", r.check, "RIGHT", 4, 0)
+    r.label:SetPoint("RIGHT", r, "RIGHT", -4, 0)
+    r.label:SetJustifyH("LEFT")
+
+    savedRowFrames[i] = r
+  end
+
+  for i, row in ipairs(rows) do
+    local r = savedRowFrames[i]
+    r.configID = row.id
+    r.isActive = row.isActive
+    if row.isActive then
+      r.label:SetText(row.name .. " |cff888888[Active]|r")
+      r.check:SetChecked(false)
+      r.check:Disable()
+    else
+      r.label:SetText(row.name)
+      r.check:Enable()
+      r.check:SetChecked(false)
+    end
+    r:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -(i - 1) * ROW_HEIGHT)
+    r:Show()
+  end
+
+  -- Hide any leftover rows from a previous, longer list.
+  for i = #rows + 1, #savedRowFrames do
+    savedRowFrames[i]:Hide()
+  end
+
+  content:SetHeight(math.max(1, #rows * ROW_HEIGHT))
 end
 
 local function currentSpecName()
@@ -44,7 +103,14 @@ function Window.Refresh()
       frame.TitleText:SetText("Talent Loadouts")
     end
   end
-  -- Row + footer refresh added in later tasks.
+
+  local specID = PlayerUtil and PlayerUtil.GetCurrentSpecID and PlayerUtil.GetCurrentSpecID()
+  local activeID = C_ClassTalents and C_ClassTalents.GetActiveConfigID and C_ClassTalents.GetActiveConfigID()
+  local rows = (ns.Data and ns.Data.GetLoadouts and specID)
+    and ns.Data.GetLoadouts(specID, activeID)
+    or {}
+
+  renderRows(frame.scrollContent, rows, frame.scrollRows)
 end
 
 function Window.Toggle()
