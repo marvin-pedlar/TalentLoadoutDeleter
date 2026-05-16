@@ -13,3 +13,8 @@ Thumbs.db
 # Local IDE state
 .vscode/launch.json
 .idea/
+
+# Internal dev artifacts (not for public repo)
+.claude/
+addon-dev-learning.md
+docs/superpowers/
