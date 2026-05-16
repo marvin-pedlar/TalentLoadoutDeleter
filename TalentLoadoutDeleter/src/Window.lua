@@ -27,6 +27,26 @@ local function createFrame()
   return f
 end
 
+local function currentSpecName()
+  local specIndex = GetSpecialization()
+  if not specIndex then return "" end
+  local _, name = GetSpecializationInfo(specIndex)
+  return name or ""
+end
+
+function Window.Refresh()
+  if not frame then return end
+  if frame.TitleText then
+    local specName = currentSpecName()
+    if specName ~= "" then
+      frame.TitleText:SetText("Talent Loadouts — " .. specName)
+    else
+      frame.TitleText:SetText("Talent Loadouts")
+    end
+  end
+  -- Row + footer refresh added in later tasks.
+end
+
 function Window.Toggle()
   if not frame then
     frame = createFrame()
@@ -34,6 +54,7 @@ function Window.Toggle()
   if frame:IsShown() then
     frame:Hide()
   else
+    Window.Refresh()
     frame:Show()
   end
 end

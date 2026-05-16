@@ -24,4 +24,14 @@ Describe "Window.lua structure" {
     Assert-Match $script:windowSource 'local\s+frame\s*$|local\s+frame\s*=\s*nil|if\s+not\s+frame' `
       "Expected lazy frame creation"
   }
+
+  It "exposes Window.Refresh" {
+    Assert-Match $script:windowSource 'function\s+Window\.Refresh' `
+      "Expected Window.Refresh function"
+  }
+
+  It "uses GetSpecializationInfo for title" {
+    Assert-Match $script:windowSource 'GetSpecializationInfo' `
+      "Expected GetSpecializationInfo for title text"
+  }
 }
