@@ -72,9 +72,6 @@ function Hooks.Install()
   -- immediately without triggering UpdateSelectionOptions (which would
   -- error if possibleSelections happens to be nil).
   local LoadSystem = PlayerSpellsFrame.TalentsFrame.LoadSystem
-  print("|cff00ff00TLD|r: Hooks.Install — LoadSystem =", LoadSystem and "frame" or "nil",
-        "; existing menuGenerator =", LoadSystem.Dropdown and type(LoadSystem.Dropdown.menuGenerator) or "no Dropdown",
-        "; possibleSelections =", LoadSystem.possibleSelections and "set" or "nil")
 
   local function buildWrappedGenerator(origGenerator)
     if isOurWrapper[origGenerator] then return origGenerator end
@@ -182,11 +179,9 @@ function Hooks.Install()
   -- 1) Hook the instance method for any future UpdateSelectionOptions calls
   --    (e.g. after TRAIT_CONFIG_LIST_UPDATED fires).
   hooksecurefunc(LoadSystem, "UpdateSelectionOptions", function(self)
-    print("|cff00ff00TLD|r: hook fired (UpdateSelectionOptions)")
     local orig = self.Dropdown.menuGenerator
     if not orig or isOurWrapper[orig] then return end
     self.Dropdown:SetupMenu(buildWrappedGenerator(orig))
-    print("|cff00ff00TLD|r: wrapped generator installed via hook")
   end)
 
   -- 2) Wrap any pre-existing menuGenerator that Blizzard set before our
@@ -195,9 +190,6 @@ function Hooks.Install()
   local dropdown = LoadSystem.Dropdown
   if dropdown and dropdown.menuGenerator and not isOurWrapper[dropdown.menuGenerator] then
     dropdown:SetupMenu(buildWrappedGenerator(dropdown.menuGenerator))
-    print("|cff00ff00TLD|r: wrapped pre-existing menuGenerator inline")
-  else
-    print("|cff00ff00TLD|r: no pre-existing menuGenerator to wrap (waiting for hook)")
   end
 end
 
