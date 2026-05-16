@@ -38,9 +38,13 @@ Describe "Core.lua structure" {
       "Expected TRAIT_CONFIG_DELETED registration"
   }
 
-  It "suppresses refresh during bulk delete" {
-    Assert-Match $script:coreSource 'TRAIT_CONFIG_DELETED[\s\S]*isBulkDeleting' `
-      "Expected TRAIT_CONFIG_DELETED to consult isBulkDeleting"
+  It "suppresses refresh during bulk delete (guard precedes callback)" {
+    # Pins the control flow: the isBulkDeleting check must precede any
+    # OnLoadoutsChanged invocation in the TRAIT_CONFIG_DELETED branch.
+    # Co-occurrence alone is not enough — a future refactor could move
+    # the guard below the call and silently break the no-flicker promise.
+    Assert-Match $script:coreSource 'TRAIT_CONFIG_DELETED[\s\S]*?if\s+not\s+TLD\.state\.isBulkDeleting[\s\S]*?OnLoadoutsChanged' `
+      "Expected the isBulkDeleting guard to precede OnLoadoutsChanged() in TRAIT_CONFIG_DELETED"
   }
 
   It "registers PLAYER_SPECIALIZATION_CHANGED" {
