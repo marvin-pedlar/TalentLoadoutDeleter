@@ -75,4 +75,19 @@ t.test("generic loadout (type 3) is filtered out", function()
   t.assert_eq(rows[1].id, 301, "id of surviving row")
 end)
 
+t.test("nil GetConfigInfo result is skipped", function()
+  stub_blizzard(
+    {401, 402},
+    {
+      [401] = { ID = 401, name = "Raid", type = 1, treeIDs = {} },
+      -- [402] intentionally absent -> GetConfigInfo returns nil
+    },
+    nil
+  )
+  local Data = load_data()
+  local rows = Data.GetLoadouts(62, nil)
+  t.assert_len(rows, 1, "nil entry must not break the surrounding rows")
+  t.assert_eq(rows[1].name, "Raid", "valid row preserved")
+end)
+
 t.run()
