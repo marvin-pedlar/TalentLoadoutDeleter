@@ -65,13 +65,24 @@ function Hooks.Install()
             local activeID = C_ClassTalents.GetActiveConfigID()
             local isActive = (configID == activeID)
 
-            local x = CreateFrame("Button", nil, button)
-            x:SetSize(16, 16)
-            x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+            -- Cache one X-button per pooled menu button to avoid creating
+            -- a fresh frame on every menu open (the compositor does NOT
+            -- manage children created via plain CreateFrame — only those
+            -- attached via button:AttachTexture / AttachFontString are
+            -- pool-aware). Reusing the cached frame bounds the number of
+            -- X buttons to the size of Blizzard's menu button pool.
+            local x = button._tldX
+            if not x then
+              x = CreateFrame("Button", nil, button)
+              x:SetSize(16, 16)
+              x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+              button._tldX = x
+            end
+            x:ClearAllPoints()
             x:SetPoint("RIGHT", button, "RIGHT", -22, 0)
+            local tex = x:GetNormalTexture()
 
             if isActive then
-              local tex = x:GetNormalTexture()
               tex:SetDesaturated(true)
               tex:SetVertexColor(0.5, 0.5, 0.5)
               x:SetScript("OnEnter", function(self)
@@ -80,7 +91,10 @@ function Hooks.Install()
                 GameTooltip:Show()
               end)
               x:SetScript("OnLeave", function() GameTooltip:Hide() end)
+              x:SetScript("OnClick", nil)
             else
+              tex:SetDesaturated(false)
+              tex:SetVertexColor(1, 1, 1)
               x:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetText("Shift-click to delete this loadout.")
@@ -98,6 +112,7 @@ function Hooks.Install()
                 menu:Close()
               end)
             end
+            x:Show()
           end)
         end
       end

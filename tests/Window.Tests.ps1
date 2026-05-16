@@ -55,11 +55,14 @@ Describe "Window.lua structure" {
       "Expected DeleteConfig invocation"
   }
 
-  It "guards bulk delete with isBulkDeleting flag" {
-    Assert-Match $script:windowSource 'isBulkDeleting\s*=\s*true' `
-      "Expected isBulkDeleting flag set to true"
-    Assert-Match $script:windowSource 'isBulkDeleting\s*=\s*false' `
-      "Expected isBulkDeleting flag reset to false"
+  It "guards bulk delete with isBulkDeleting set true before DeleteConfig and false after" {
+    # Pin the control flow: true must precede the DeleteConfig call, false
+    # must follow it. Co-occurrence alone (which the prior regex pair tested)
+    # could pass even if the flag was flipped in a dead branch or in the
+    # wrong order. Same class of bug as the Phase 2 TRAIT_CONFIG_DELETED
+    # regex tightening (commit c177012).
+    Assert-Match $script:windowSource 'isBulkDeleting\s*=\s*true[\s\S]{0,400}C_ClassTalents\.DeleteConfig[\s\S]{0,400}isBulkDeleting\s*=\s*false' `
+      "Expected isBulkDeleting=true to precede DeleteConfig and =false to follow"
   }
 
   It "has a Select All checkbox" {
@@ -72,15 +75,20 @@ Describe "Window.lua structure" {
       "Expected empty-state string"
   }
 
-  It "installs the OnLoadoutsChanged callback" {
+  It "installs the OnLoadoutsChanged callback that triggers a Refresh" {
     Assert-Match $script:windowSource 'OnLoadoutsChanged\s*=\s*function' `
       "Expected ns.OnLoadoutsChanged assignment"
+    # Pin the call to Window.Refresh, not just the assignment existing.
+    Assert-Match $script:windowSource 'OnLoadoutsChanged\s*=\s*function[\s\S]{0,200}Window\.Refresh' `
+      "Expected the callback to call Window.Refresh()"
   }
 
   It "installs the OnSpecChanged callback that hides the window" {
     Assert-Match $script:windowSource 'OnSpecChanged\s*=\s*function' `
       "Expected ns.OnSpecChanged assignment"
-    Assert-Match $script:windowSource 'OnSpecChanged\s*=\s*function[\s\S]{0,200}Hide' `
-      "Expected the callback to Hide the frame"
+    # Pin the actual Hide() call, not the bare string "Hide" which could
+    # appear in a comment or local label.
+    Assert-Match $script:windowSource 'OnSpecChanged\s*=\s*function[\s\S]{0,200}:Hide\(' `
+      "Expected the callback to call :Hide() on the frame"
   }
 }
