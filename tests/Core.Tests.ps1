@@ -52,4 +52,19 @@ Describe "Core.lua structure" {
     Assert-Match $script:coreSource 'PLAYER_SPECIALIZATION_CHANGED[\s\S]*OnSpecChanged' `
       "Expected OnSpecChanged delegate"
   }
+
+  It "branches on Blizzard_PlayerSpells in ADDON_LOADED" {
+    Assert-Match $script:coreSource 'Blizzard_PlayerSpells' `
+      "Expected Core.lua to detect Blizzard_PlayerSpells load"
+  }
+
+  It "delegates Blizzard_PlayerSpells install to TLD.Hooks.Install" {
+    Assert-Match $script:coreSource 'Blizzard_PlayerSpells[\s\S]*Hooks\.Install' `
+      "Expected Hooks.Install dispatch on Blizzard_PlayerSpells load"
+  }
+
+  It "fires Install immediately when Blizzard_PlayerSpells is already loaded" {
+    Assert-Match $script:coreSource 'C_AddOns\.IsAddOnLoaded\(\s*"Blizzard_PlayerSpells"\s*\)' `
+      "Expected pre-check via C_AddOns.IsAddOnLoaded for already-loaded case"
+  }
 }
