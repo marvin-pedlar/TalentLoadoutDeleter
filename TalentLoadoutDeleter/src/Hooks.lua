@@ -21,12 +21,16 @@ local function createManageButton(parent)
 end
 
 local function anchorManageButton(button)
-  local dropdown = PlayerSpellsFrame
+  -- The talent loadout selector is at .LoadSystem (a Frame inheriting
+  -- DropdownLoadSystemTemplate). The inner button is LoadSystem.Dropdown.
+  -- Anchor relative to the outer LoadSystem so we sit next to the widget
+  -- the user clicks, not nested inside it.
+  local loadSystem = PlayerSpellsFrame
     and PlayerSpellsFrame.TalentsFrame
-    and PlayerSpellsFrame.TalentsFrame.LoadoutDropdown
-  if dropdown then
+    and PlayerSpellsFrame.TalentsFrame.LoadSystem
+  if loadSystem then
     button:ClearAllPoints()
-    button:SetPoint("LEFT", dropdown, "RIGHT", 6, 0)
+    button:SetPoint("LEFT", loadSystem, "RIGHT", 6, 0)
     button:Show()
   else
     button:Hide()
