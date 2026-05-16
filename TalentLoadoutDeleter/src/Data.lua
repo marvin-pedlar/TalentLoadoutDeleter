@@ -10,7 +10,16 @@ local Data = {}
 function Data.GetLoadouts(specID, activeConfigID)
   local configIDs = C_ClassTalents.GetConfigIDsBySpecID(specID) or {}
   local rows = {}
-  -- Filtering and sorting added in later tasks.
+  for _, id in ipairs(configIDs) do
+    local info = C_Traits.GetConfigInfo(id)
+    if info ~= nil and info.type == Enum.TraitConfigType.Combat then
+      table.insert(rows, {
+        id = id,
+        name = info.name,
+        isActive = (id == activeConfigID),
+      })
+    end
+  end
   return rows
 end
 

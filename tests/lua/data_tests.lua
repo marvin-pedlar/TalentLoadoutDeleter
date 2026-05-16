@@ -31,4 +31,18 @@ t.test("empty configIDs returns empty list", function()
   t.assert_len(rows, 0, "expected zero rows")
 end)
 
+t.test("single combat loadout is returned", function()
+  stub_blizzard(
+    {101},
+    { [101] = { ID = 101, name = "Raid", type = 1, treeIDs = {} } },
+    nil
+  )
+  local Data = load_data()
+  local rows = Data.GetLoadouts(62, nil)
+  t.assert_len(rows, 1, "expected one row")
+  t.assert_eq(rows[1].id, 101, "id")
+  t.assert_eq(rows[1].name, "Raid", "name")
+  t.assert_eq(rows[1].isActive, false, "isActive when activeConfigID nil")
+end)
+
 t.run()
