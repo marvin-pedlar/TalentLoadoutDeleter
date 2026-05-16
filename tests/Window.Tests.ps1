@@ -44,4 +44,21 @@ Describe "Window.lua structure" {
     Assert-Match $script:windowSource 'CreateFrame\(\s*"ScrollFrame"|WowScrollBoxList' `
       "Expected ScrollFrame or WowScrollBoxList"
   }
+
+  It "has a Delete Selected button" {
+    Assert-Match $script:windowSource 'SetText\(\s*"Delete Selected' `
+      "Expected button labeled 'Delete Selected'"
+  }
+
+  It "calls C_ClassTalents.DeleteConfig from the delete handler" {
+    Assert-Match $script:windowSource 'C_ClassTalents\.DeleteConfig' `
+      "Expected DeleteConfig invocation"
+  }
+
+  It "guards bulk delete with isBulkDeleting flag" {
+    Assert-Match $script:windowSource 'isBulkDeleting\s*=\s*true' `
+      "Expected isBulkDeleting flag set to true"
+    Assert-Match $script:windowSource 'isBulkDeleting\s*=\s*false' `
+      "Expected isBulkDeleting flag reset to false"
+  }
 }

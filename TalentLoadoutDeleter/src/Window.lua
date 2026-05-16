@@ -5,6 +5,7 @@ local _, ns = ...
 ns = ns or {}
 
 local Window = {}
+ns.state = ns.state or { isBulkDeleting = false }
 local frame
 
 local function createFrame()
@@ -35,8 +36,51 @@ local function createFrame()
   f.scrollContent = content
   f.scrollRows = {}
 
+  local footer = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  footer:SetSize(340, 28)
+  footer:SetPoint("BOTTOM", f, "BOTTOM", 0, 12)
+  footer:SetText("Delete Selected (0)")
+  footer:Disable()
+  f.footer = footer
+
+  footer:SetScript("OnClick", function()
+    local toDelete = {}
+    for _, r in ipairs(f.scrollRows) do
+      if r:IsShown() and r.check:GetChecked() and not r.isActive then
+        table.insert(toDelete, r.configID)
+      end
+    end
+    if #toDelete == 0 then return end
+
+    if ns.state then ns.state.isBulkDeleting = true end
+    for _, id in ipairs(toDelete) do
+      pcall(C_ClassTalents.DeleteConfig, id)
+    end
+    if ns.state then ns.state.isBulkDeleting = false end
+
+    Window.Refresh()
+  end)
+
   f:Hide()
   return f
+end
+
+local function currentSpecName()
+  local specIndex = GetSpecialization()
+  if not specIndex then return "" end
+  local _, name = GetSpecializationInfo(specIndex)
+  return name or ""
+end
+
+local function updateFooter(f)
+  local selected = 0
+  for _, r in ipairs(f.scrollRows) do
+    if r:IsShown() and r.check:GetChecked() and not r.isActive then
+      selected = selected + 1
+    end
+  end
+  f.footer:SetText(("Delete Selected (%d)"):format(selected))
+  if selected > 0 then f.footer:Enable() else f.footer:Disable() end
 end
 
 local ROW_HEIGHT = 24
@@ -52,6 +96,9 @@ local function renderRows(content, rows, savedRowFrames)
     r.check = CreateFrame("CheckButton", nil, r, "UICheckButtonTemplate")
     r.check:SetSize(20, 20)
     r.check:SetPoint("LEFT", r, "LEFT", 0, 0)
+    r.check:SetScript("OnClick", function()
+      updateFooter(content:GetParent():GetParent()) -- content -> scroll -> frame
+    end)
 
     r.label = r:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     r.label:SetPoint("LEFT", r.check, "RIGHT", 4, 0)
@@ -84,13 +131,7 @@ local function renderRows(content, rows, savedRowFrames)
   end
 
   content:SetHeight(math.max(1, #rows * ROW_HEIGHT))
-end
-
-local function currentSpecName()
-  local specIndex = GetSpecialization()
-  if not specIndex then return "" end
-  local _, name = GetSpecializationInfo(specIndex)
-  return name or ""
+  updateFooter(content:GetParent():GetParent())
 end
 
 function Window.Refresh()
