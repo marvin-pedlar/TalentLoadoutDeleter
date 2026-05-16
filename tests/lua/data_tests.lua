@@ -45,4 +45,19 @@ t.test("single combat loadout is returned", function()
   t.assert_eq(rows[1].isActive, false, "isActive when activeConfigID nil")
 end)
 
+t.test("profession loadout is filtered out", function()
+  stub_blizzard(
+    {201, 202},
+    {
+      [201] = { ID = 201, name = "Raid",   type = 1, treeIDs = {} },
+      [202] = { ID = 202, name = "Mining", type = 2, treeIDs = {} },
+    },
+    nil
+  )
+  local Data = load_data()
+  local rows = Data.GetLoadouts(62, nil)
+  t.assert_len(rows, 1, "only the combat row should survive")
+  t.assert_eq(rows[1].name, "Raid", "name of surviving row")
+end)
+
 t.run()
