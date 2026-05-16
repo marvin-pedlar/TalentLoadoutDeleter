@@ -46,6 +46,65 @@ function Hooks.Install()
     anchorManageButton(button)
   end)
   anchorManageButton(button)
+
+  -- Inline [X] injection: hook the LoadSystem's UpdateSelectionOptions
+  -- and wrap its menuGenerator so each loadout radio gets an [X] initializer.
+  -- The compositor releases attached children when the menu closes.
+  local LoadSystem = PlayerSpellsFrame.TalentsFrame.LoadSystem
+  hooksecurefunc(LoadSystem, "UpdateSelectionOptions", function(self)
+    local origGenerator = self.Dropdown.menuGenerator
+    if not origGenerator or origGenerator._tld_wrapped then return end
+
+    local wrapped = function(dropdown, rootDescription)
+      origGenerator(dropdown, rootDescription)
+
+      for _, desc in rootDescription:EnumerateElementDescriptions() do
+        local configID = desc:GetData()
+        if type(configID) == "number" then
+          desc:AddInitializer(function(button, description, menu)
+            local activeID = C_ClassTalents.GetActiveConfigID()
+            local isActive = (configID == activeID)
+
+            local x = CreateFrame("Button", nil, button)
+            x:SetSize(16, 16)
+            x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
+            x:SetPoint("RIGHT", button, "RIGHT", -22, 0)
+
+            if isActive then
+              local tex = x:GetNormalTexture()
+              tex:SetDesaturated(true)
+              tex:SetVertexColor(0.5, 0.5, 0.5)
+              x:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Cannot delete the active loadout — switch first.")
+                GameTooltip:Show()
+              end)
+              x:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            else
+              x:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Shift-click to delete this loadout.")
+                GameTooltip:Show()
+              end)
+              x:SetScript("OnLeave", function() GameTooltip:Hide() end)
+              x:SetScript("OnClick", function(self)
+                if not IsShiftKeyDown() then
+                  GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                  GameTooltip:SetText("Hold Shift and click to delete.")
+                  GameTooltip:Show()
+                  return
+                end
+                C_ClassTalents.DeleteConfig(configID)
+                menu:Close()
+              end)
+            end
+          end)
+        end
+      end
+    end
+    wrapped._tld_wrapped = true
+    self.Dropdown:SetupMenu(wrapped)
+  end)
 end
 
 ns.Hooks = Hooks
