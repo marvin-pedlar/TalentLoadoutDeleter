@@ -1,0 +1,12 @@
+package-as: TalentLoadoutDeleter
+manual-changelog: CHANGELOG.md
+
+ignore:
+  - .gitignore
+  - .github
+  - .pkgmeta
+  - docs
+  - scripts
+  - tests
+  - addon-dev-learning.md
+  - README.md

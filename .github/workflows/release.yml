@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-before-publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure Pester 5 is available
+        shell: pwsh
+        run: |
+          $hasV5 = Get-Module -ListAvailable Pester | Where-Object { $_.Version.Major -ge 5 }
+          if (-not $hasV5) {
+            Set-PSRepository PSGallery -InstallationPolicy Trusted
+            Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck
+          }
+
+      - name: Run tests
+        shell: pwsh
+        run: ./scripts/run-tests.ps1
+
+  package-and-publish:
+    runs-on: ubuntu-latest
+    needs:
+      - verify-before-publish
+    environment: curseforge-production
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      CF_PROJECT_ID: ${{ secrets.CF_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate CurseForge secrets
+        shell: bash
+        run: |
+          if [ -z "${CF_API_KEY}" ] || [ -z "${CF_PROJECT_ID}" ]; then
+            echo "Missing required repository secrets: CF_API_KEY and/or CF_PROJECT_ID"
+            exit 1
+          fi
+
+      - name: Package and publish
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -p ${{ env.CF_PROJECT_ID }}
+        env:
+          CF_API_KEY: ${{ env.CF_API_KEY }}
