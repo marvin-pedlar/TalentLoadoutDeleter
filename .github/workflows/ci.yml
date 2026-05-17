@@ -1,0 +1,110 @@
+name: Verify
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint-lua:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Luacheck
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 liblua5.1-dev luarocks
+          sudo luarocks install luacheck
+
+      - name: Lint Lua files
+        shell: bash
+        run: |
+          find . -name '*.lua' \
+            -not -path './tests/*' \
+            -not -path './scripts/*' \
+            -not -path './.release/*' \
+            -print0 \
+          | xargs -0 -r luacheck --std lua51 --no-global --no-unused-args --no-max-line-length
+
+  test-powershell:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure Pester 5 is available
+        shell: pwsh
+        run: |
+          $hasV5 = Get-Module -ListAvailable Pester | Where-Object { $_.Version.Major -ge 5 }
+          if (-not $hasV5) {
+            Set-PSRepository PSGallery -InstallationPolicy Trusted
+            Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck
+          }
+
+      - name: Run tests
+        shell: pwsh
+        run: ./scripts/run-tests.ps1
+
+  package-dry-run:
+    runs-on: ubuntu-latest
+    needs:
+      - lint-lua
+      - test-powershell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Build package (dry-run, no upload)
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -d
+
+      - name: Validate packaged content policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_file="$(find .release -type f -name '*.zip' | head -n 1)"
+          if [ -z "${zip_file}" ]; then
+            echo "No packaged zip found under .release"
+            exit 1
+          fi
+
+          unzip -l "${zip_file}" > package-contents.txt
+
+          forbidden_patterns=(
+            "/.github/"
+            "/debug/"
+            "/docs/"
+            "/scripts/"
+            "/tests/"
+            "addon-dev-learning.md"
+          )
+
+          for pattern in "${forbidden_patterns[@]}"; do
+            if grep -Fq "${pattern}" package-contents.txt; then
+              echo "Forbidden package content found: ${pattern}"
+              exit 1
+            fi
+          done
+
+      - name: Upload verification artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-dry-run
+          path: |
+            .release/*.zip
+            package-contents.txt
+          if-no-files-found: error
