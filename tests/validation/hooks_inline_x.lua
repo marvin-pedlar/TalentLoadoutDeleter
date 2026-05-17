@@ -160,7 +160,7 @@ print = function(...) end
 
 local addonName = "TalentLoadoutDeleter"
 local ns = {}
-local Hooks_chunk, err = loadfile("C:/Users/tekau/Documents/Codex/TalentLoadoutDeleter/TalentLoadoutDeleter/src/Hooks.lua")
+local Hooks_chunk, err = loadfile("C:/Users/tekau/Documents/Codex/TalentLoadoutDeleter/src/Hooks.lua")
 if err then fail("loadfile: " .. tostring(err)) end
 
 local ok, loadErr = pcall(Hooks_chunk, addonName, ns)

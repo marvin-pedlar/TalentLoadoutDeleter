@@ -4,7 +4,7 @@ package.path = script_dir .. "?.lua;" .. package.path
 local t = require("test_runner")
 
 -- Path to the source file under test (relative to the script's launch dir).
-local DATA_LUA = script_dir .. "../../TalentLoadoutDeleter/src/Data.lua"
+local DATA_LUA = script_dir .. "../../src/Data.lua"
 
 -- Common stubs reset per test by stub_blizzard().
 local function stub_blizzard(configIDs, infoByID, activeID)

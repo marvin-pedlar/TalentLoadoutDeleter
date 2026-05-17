@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$sourceDir = Join-Path $repoRoot "TalentLoadoutDeleter"
+$sourceDir = $repoRoot
 $runTests = Join-Path $repoRoot "scripts\run-tests.ps1"
 
 if (-not (Test-Path -LiteralPath $LiveAddonDir)) {

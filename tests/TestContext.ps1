@@ -57,7 +57,7 @@ function Initialize-TestContext {
   if ($initializedVar -and $initializedVar.Value) { return }
 
   $script:repoRoot = Split-Path -Parent $PSScriptRoot
-  $script:addonDir = Join-Path $script:repoRoot "TalentLoadoutDeleter"
+  $script:addonDir = $script:repoRoot
   $script:srcDir = Join-Path $script:addonDir "src"
   $script:tocPath = Join-Path $script:addonDir "TalentLoadoutDeleter.toc"
 
