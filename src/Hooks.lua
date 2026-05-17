@@ -87,7 +87,7 @@ function Hooks.Install()
         -- this time — and our cached `button._tldX` would still be
         -- visible from the prior render. The initializer below hides the
         -- cached X on non-loadout rows.
-        desc:AddInitializer(function(button, description, menu)
+        desc:AddInitializer(function(menuButton, description, menu)
           local STARTER_BUILD = Constants and Constants.TraitConsts
             and Constants.TraitConsts.STARTER_BUILD_TRAIT_CONFIG_ID
           local isLoadout = type(configID) == "number"
@@ -103,7 +103,7 @@ function Hooks.Install()
           --      unmarked orphans from older addon versions, robust
           --      against in-game path normalization that may differ from
           --      the literal we passed to SetNormalTexture).
-          local children = { button:GetChildren() }
+          local children = { menuButton:GetChildren() }
           for _, child in ipairs(children) do
             local shouldHide = child._tldOwned == true
             if not shouldHide then
@@ -118,7 +118,7 @@ function Hooks.Install()
             end
             if shouldHide then child:Hide() end
           end
-          local x = button._tldX
+          local x = menuButton._tldX
 
           if not isLoadout then
             return
@@ -128,14 +128,14 @@ function Hooks.Install()
           local isActive = (configID == activeID)
 
           if not x then
-            x = CreateFrame("Button", nil, button)
+            x = CreateFrame("Button", nil, menuButton)
             x:SetSize(16, 16)
             x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
             x._tldOwned = true  -- reliable signal for the orphan scan above
-            button._tldX = x
+            menuButton._tldX = x
           end
           x:ClearAllPoints()
-          x:SetPoint("RIGHT", button, "RIGHT", -22, 0)
+          x:SetPoint("RIGHT", menuButton, "RIGHT", -22, 0)
           local tex = x:GetNormalTexture()
 
           if isActive then

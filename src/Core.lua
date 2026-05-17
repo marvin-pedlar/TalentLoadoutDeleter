@@ -1,10 +1,9 @@
 -- TalentLoadoutDeleter / Core.lua
 -- Bootstrap + event dispatch.
 
-local addonName, ns = ...
+local _, ns = ...
 
 local TLD = ns or {}
-ns = TLD
 _G.TalentLoadoutDeleter = TLD  -- top-level handle for debug only; not API
 
 TLD.state = {
