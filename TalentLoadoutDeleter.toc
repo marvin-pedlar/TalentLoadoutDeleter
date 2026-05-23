@@ -2,7 +2,7 @@
 ## Title: TalentLoadoutDeleter
 ## Notes: One-click + bulk delete of saved talent loadouts.
 ## Author: Marvin Pedlar
-## Version: 0.1.1
+## Version: 0.1.2
 ## IconTexture: Interface\Icons\Trade_Engineering
 
 src\Data.lua

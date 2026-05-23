@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.2] - 2026-05-23
+
+Fix taint regression — inline `[X]` no longer poisons the Blizzard menu button pool.
+
+### Fixed
+- Inline `[X]` now uses the canonical menu compositor API (`Menu.ModifyMenu("MENU_CLASS_TALENT_PROFILE", ...)` + `MenuTemplates.AttachUtilityButton` / `SetUtilityButtonClickHandler` / `SetUtilityButtonTooltipText` / `SetUtilityButtonLockedEnabledState`). The previous approach wrote raw keys on pooled menu buttons, iterated their children, and `CreateFrame`'d with a pooled parent — three patterns that taint the session-wide menu pool. The taint surfaced as `attempted to index/iterate a table that cannot be accessed while tainted (execution tainted by 'TalentLoadoutDeleter')` in Blizzard's `CastingBarFrame.lua` on `UNIT_SPELLCAST_START`.
+
+### Changed
+- Inline `[X]` is now visible only when you hover the loadout row, matching Blizzard's existing edit-entry gear button. This is required by the safe compositor API; always-visible Xes required the exact pattern that tainted.
+
 ## [0.1.1] - 2026-05-17
 
 First CurseForge release. No gameplay-affecting changes from `0.1.0`.
