@@ -1,36 +1,26 @@
--- Standalone pre-validation for Hooks.lua. Stubs every Blizzard global
--- the file touches, then exercises every code path the live integration
--- depends on, including:
---   * loadout row (numeric configID) → X created, sized, shown
---   * Starter Build row (numeric, but == STARTER_BUILD_TRAIT_CONFIG_ID) → no X
---   * sentinel row (non-numeric data, e.g. "Import") → no X
---   * button-pool reuse: a button that rendered a loadout last time
---     now renders a sentinel → cached X is hidden, not left visible
---   * sentinel: indexing a function errors (proves the prior
---     `wrapped._tld_wrapped` sentinel approach was always broken)
--- Run via: lua tld_hooks_validate.lua
+-- Standalone pre-validation for Hooks.lua. Verifies the inline [X] uses
+-- the canonical Blizzard menu compositor APIs and does NOT taint the
+-- session-wide menu button pool.
+--
+-- Run via: lua tests/validation/hooks_inline_x.lua
 -- Exits 0 on all-green, 1 on any failure.
+--
+-- Why this file exists: addon-dev-learning.md item B1 documents the bug
+-- where raw key writes on pooled menu buttons, insecure CreateFrame with
+-- pooled parent, and iteration of Blizzard-owned children all leak taint
+-- onto the pool. The taint surfaces session-wide at every secure access
+-- of CastingBarTypeInfo (e.g. CastingBarMixin:GetTypeInfo on
+-- UNIT_SPELLCAST_START). The fix uses Menu.ModifyMenu + MenuTemplates.Attach*
+-- so the compositor cleans every attachment on menu close.
 
 local function fail(msg)
   io.write("FAIL: ", msg, "\n")
   os.exit(1)
 end
 
--- Lua 5.4 (harness) removed global `unpack`; WoW Lua 5.1 has both. Shim
--- so the GetChildren stub's varargs return works under either version.
 unpack = unpack or table.unpack
 
--- ---- Blizzard stubs ----
-
-function hooksecurefunc(t, name, fn)
-  local orig = t[name]
-  assert(type(orig) == "function", "hooksecurefunc: " .. name .. " is not a function")
-  t[name] = function(...)
-    orig(...)
-    fn(...)
-  end
-end
-
+-- ---- Frame stub ----
 local frameSerial = 0
 local function makeFrame(name, fields)
   frameSerial = frameSerial + 1
@@ -51,30 +41,32 @@ local function makeFrame(name, fields)
   function f:Show() self._shown = true end
   function f:Hide() self._shown = false end
   function f:IsShown() return self._shown end
-  function f:SetNormalTexture(path)
-    self._normalTex = {
-      _desat = false, _vColor = nil, _texPath = path,
-      SetDesaturated = function(self_, v) self_._desat = v end,
-      SetVertexColor = function(self_, r, g, b) self_._vColor = { r, g, b } end,
-      GetTexture = function(self_) return self_._texPath end,
-    }
+  return f
+end
+
+-- ---- Blizzard global stubs ----
+
+function hooksecurefunc(t, name, fn)
+  local orig = t[name]
+  assert(type(orig) == "function", "hooksecurefunc: " .. name .. " is not a function")
+  t[name] = function(...)
+    orig(...)
+    fn(...)
   end
-  function f:GetNormalTexture()
-    if not self._normalTex then self:SetNormalTexture(nil) end
-    return self._normalTex
+end
+
+-- Track CreateFrame calls so we can assert nothing creates a Button with a
+-- pooled-menu-button parent (the taint anti-pattern).
+local createFrameCalls = {}
+CreateFrame = function(kind, name, parent, template)
+  table.insert(createFrameCalls, { kind = kind, name = name, parent = parent, template = template })
+  local f = makeFrame(name)
+  if parent and parent._children then
+    table.insert(parent._children, f)
   end
   return f
 end
 
-local createdButtons = {}
-CreateFrame = function(kind, name, parent, template)
-  local btn = makeFrame(name)
-  table.insert(createdButtons, btn)
-  if parent and parent._children then
-    table.insert(parent._children, btn)
-  end
-  return btn
-end
 IsShiftKeyDown = function() return false end
 C_ClassTalents = {
   GetActiveConfigID = function() return 101 end,
@@ -84,32 +76,139 @@ GameTooltip = {
   SetOwner = function() end, SetText = function() end,
   Show = function() end, Hide = function() end,
 }
-
--- STARTER_BUILD_TRAIT_CONFIG_ID is the magic value tlframe.lua line ~815
--- inserts into self.configIDs for the starter build option. Use a
--- distinct sentinel number so test rows don't accidentally collide.
 Constants = { TraitConsts = { STARTER_BUILD_TRAIT_CONFIG_ID = -42 } }
 
--- Build a mockable LoadSystem instance and its Dropdown.
-local rootDescBuilder
-local mockDropdown = makeFrame("LoadSystemDropdown")
-mockDropdown._shown = true
-function mockDropdown:SetupMenu(generator)
-  self.menuGenerator = generator
-  -- Simulate Blizzard's GenerateMenu: build a rootDescription, call the
-  -- generator, then render each child desc (which fires our initializer).
-  local rootDesc = rootDescBuilder()
-  generator(self, rootDesc)
-  return rootDesc
+-- Menu / MenuTemplates stubs — record every call so we can assert the
+-- new safe pattern is used.
+local modifyMenuCalls = {}
+local attachUtilityCalls = {}
+local clickHandlerCalls = {}
+local tooltipCalls = {}
+local lockedStateCalls = {}
+
+Menu = {
+  ModifyMenu = function(tag, callback)
+    table.insert(modifyMenuCalls, { tag = tag, callback = callback })
+  end,
+}
+
+-- Each attached utility button is a fake "menuButton-pooled" frame the
+-- compositor manages. Its OnClick is set via SetUtilityButtonClickHandler.
+local function makeUtilityButton(parent, textureAsset, width, height)
+  local btn = makeFrame("utilityButton", {
+    _parent = parent,
+    _textureAsset = textureAsset,
+    _w = width, _h = height,
+    _locked = nil,  -- nil = not set; true/false = SetUtilityButtonLockedEnabledState called
+    _onClick = nil,
+    _tooltipText = nil,
+  })
+  btn._shown = true
+  return btn
 end
 
--- Helper: build a fresh rootDescription with a known mix of child descs.
--- Children:
---   1: loadout row (configID 201)
---   2: loadout row (active configID 101)
---   3: Starter Build (configID == STARTER_BUILD_TRAIT_CONFIG_ID == -42)
---   4: sentinel "Import" (data = nil)
-rootDescBuilder = function()
+MenuTemplates = {
+  AttachUtilityButton = function(parent, textureAsset, width, height)
+    local btn = makeUtilityButton(parent, textureAsset, width, height)
+    table.insert(attachUtilityCalls, {
+      parent = parent, textureAsset = textureAsset,
+      width = width, height = height, button = btn,
+    })
+    return btn
+  end,
+  SetUtilityButtonClickHandler = function(button, handler)
+    button._onClick = handler
+    table.insert(clickHandlerCalls, { button = button, handler = handler })
+  end,
+  SetUtilityButtonTooltipText = function(button, text)
+    button._tooltipText = text
+    table.insert(tooltipCalls, { button = button, text = text })
+  end,
+  SetUtilityButtonLockedEnabledState = function(button, value)
+    button._locked = value
+    table.insert(lockedStateCalls, { button = button, value = value })
+  end,
+}
+
+-- LoadSystem / PlayerSpellsFrame — minimal shape for Hooks.Install.
+local mockLoadSystem = makeFrame("LoadSystem", {
+  Dropdown = makeFrame("LoadSystemDropdown"),
+})
+mockLoadSystem._shown = true
+function mockLoadSystem:UpdateSelectionOptions() end
+
+PlayerSpellsFrame = makeFrame("PlayerSpellsFrame", {
+  TalentsFrame = makeFrame("TalentsFrame", {
+    LoadSystem = mockLoadSystem,
+    SearchBox = makeFrame("SearchBox"),
+  }),
+})
+
+-- Suppress addon prints.
+print = function(...) end
+
+-- ---- Static anti-pattern checks on the source file ----
+-- These are belt-and-suspenders against the bug ever returning: any
+-- future edit that reintroduces a tainting pattern fails the test even
+-- if the runtime path the test exercises doesn't happen to hit it.
+
+local hooksPath = "C:/Users/tekau/Documents/Codex/TalentLoadoutDeleter/src/Hooks.lua"
+local fh = io.open(hooksPath, "r")
+if not fh then fail("cannot open " .. hooksPath) end
+local hooksSource = fh:read("*a")
+fh:close()
+
+if hooksSource:find("_tldX") then
+  fail("static: Hooks.lua must not write the raw key '_tldX' on pooled menu buttons (compositor taint)")
+end
+if hooksSource:find("_tldOwned") then
+  fail("static: Hooks.lua must not write the raw key '_tldOwned' on pooled menu buttons (compositor taint)")
+end
+if hooksSource:find("menuButton:GetChildren") then
+  fail("static: Hooks.lua must not iterate menuButton:GetChildren() (taints Blizzard-owned pooled widgets)")
+end
+if hooksSource:find("CreateFrame%([^)]*menuButton") then
+  fail("static: Hooks.lua must not CreateFrame(...) with a pooled menuButton parent (insecure-parent taint)")
+end
+if not hooksSource:find('Menu%.ModifyMenu%(%s*"MENU_CLASS_TALENT_PROFILE"') then
+  fail("static: Hooks.lua must call Menu.ModifyMenu(\"MENU_CLASS_TALENT_PROFILE\", ...) to decorate the loadout dropdown")
+end
+if not hooksSource:find("MenuTemplates%.AttachUtilityButton") then
+  fail("static: Hooks.lua must create the X via MenuTemplates.AttachUtilityButton (compositor-managed)")
+end
+io.write("OK static checks: no taint anti-patterns; canonical Menu.ModifyMenu + MenuTemplates path used\n")
+
+-- ---- Load Hooks.lua ----
+
+local addonName = "TalentLoadoutDeleter"
+local ns = {}
+local Hooks_chunk, err = loadfile(hooksPath)
+if err then fail("loadfile: " .. tostring(err)) end
+
+local ok, loadErr = pcall(Hooks_chunk, addonName, ns)
+if not ok then fail("chunk pcall: " .. tostring(loadErr)) end
+
+assert(ns.Hooks, "ns.Hooks should be set")
+assert(type(ns.Hooks.Install) == "function", "ns.Hooks.Install missing")
+
+-- ---- Install ----
+local ok2, installErr = pcall(ns.Hooks.Install)
+if not ok2 then fail("Hooks.Install errored: " .. tostring(installErr)) end
+io.write("OK Hooks.Install completed without error\n")
+
+-- ---- Assert Menu.ModifyMenu was called exactly once with the right tag ----
+if #modifyMenuCalls ~= 1 then
+  fail("expected exactly 1 Menu.ModifyMenu call, got " .. #modifyMenuCalls)
+end
+if modifyMenuCalls[1].tag ~= "MENU_CLASS_TALENT_PROFILE" then
+  fail("Menu.ModifyMenu was called with tag '" .. tostring(modifyMenuCalls[1].tag) ..
+       "', expected 'MENU_CLASS_TALENT_PROFILE'")
+end
+io.write("OK Menu.ModifyMenu(\"MENU_CLASS_TALENT_PROFILE\", ...) registered exactly once\n")
+
+-- ---- Invoke the callback with a fake rootDescription ----
+-- Build 4 children: loadout 201, active 101, Starter Build (-42), sentinel (nil).
+local function buildRootDescription()
   local rootDesc = { children = {} }
   local function mkDesc(data)
     return {
@@ -124,7 +223,7 @@ rootDescBuilder = function()
   rootDesc.children[1] = mkDesc(201)
   rootDesc.children[2] = mkDesc(101)
   rootDesc.children[3] = mkDesc(Constants.TraitConsts.STARTER_BUILD_TRAIT_CONFIG_ID)
-  rootDesc.children[4] = mkDesc(nil)  -- sentinel
+  rootDesc.children[4] = mkDesc(nil)
   rootDesc.EnumerateElementDescriptions = function(self_)
     local i = 0
     return function()
@@ -137,228 +236,157 @@ rootDescBuilder = function()
   return rootDesc
 end
 
-local mockLoadSystem = makeFrame("LoadSystem", { Dropdown = mockDropdown })
-mockLoadSystem.possibleSelections = {201, 101, -42}
-function mockLoadSystem:UpdateSelectionOptions()
-  local function blizzGen(_, _) end
-  self.Dropdown:SetupMenu(blizzGen)
+local rootDesc = buildRootDescription()
+local mockOwner = mockLoadSystem.Dropdown
+local cb = modifyMenuCalls[1].callback
+
+-- Reset trackers before running the callback so we can assert exact counts.
+attachUtilityCalls = {}
+clickHandlerCalls = {}
+tooltipCalls = {}
+lockedStateCalls = {}
+createFrameCalls = {}
+
+local okCb, cbErr = pcall(cb, mockOwner, rootDesc, nil)
+if not okCb then fail("ModifyMenu callback errored: " .. tostring(cbErr)) end
+io.write("OK ModifyMenu callback ran without error\n")
+
+-- ---- Only loadout descs (1, 2) should have an initializer attached ----
+if #rootDesc.children[1]._initializers ~= 1 then
+  fail("loadout desc 201 must have 1 initializer, got " .. #rootDesc.children[1]._initializers)
 end
-mockLoadSystem.Dropdown:SetupMenu(function() end)  -- pre-existing blizz generator
+if #rootDesc.children[2]._initializers ~= 1 then
+  fail("active loadout desc 101 must have 1 initializer, got " .. #rootDesc.children[2]._initializers)
+end
+if #rootDesc.children[3]._initializers ~= 0 then
+  fail("Starter Build desc must have 0 initializers (filtered as non-deletable), got "
+       .. #rootDesc.children[3]._initializers)
+end
+if #rootDesc.children[4]._initializers ~= 0 then
+  fail("sentinel desc (nil data) must have 0 initializers, got " .. #rootDesc.children[4]._initializers)
+end
+io.write("OK initializers attached only to loadout rows (skipped Starter Build + sentinel)\n")
 
-PlayerSpellsFrame = makeFrame("PlayerSpellsFrame", {
-  TalentsFrame = makeFrame("TalentsFrame", {
-    LoadSystem = mockLoadSystem,
-    SearchBox = makeFrame("SearchBox"),
-  }),
-})
-DropdownLoadSystemMixin = { UpdateSelectionOptions = function() end }
+-- ---- Fire each loadout initializer with a fake pooled menuButton ----
 
--- Suppress diagnostic prints from Hooks.lua so test output stays clean.
-print = function(...) end
-
--- ---- Load Hooks.lua ----
-
-local addonName = "TalentLoadoutDeleter"
-local ns = {}
-local Hooks_chunk, err = loadfile("C:/Users/tekau/Documents/Codex/TalentLoadoutDeleter/src/Hooks.lua")
-if err then fail("loadfile: " .. tostring(err)) end
-
-local ok, loadErr = pcall(Hooks_chunk, addonName, ns)
-if not ok then fail("chunk pcall: " .. tostring(loadErr)) end
-
-assert(ns.Hooks, "ns.Hooks should be set")
-assert(type(ns.Hooks.Install) == "function", "ns.Hooks.Install missing")
-
--- ---- Sanity: function field indexing errors ----
+-- Child 1: non-active loadout 201
 do
-  local f = function() end
-  local ok_, _ = pcall(function() local x = f._foo end)
-  if ok_ then
-    fail("Expected indexing a function to error (proves prior _tld_wrapped sentinel was broken)")
-  end
-  io.write("OK function indexing errors as expected\n")
-end
-
--- ---- Install ----
-local ok2, installErr = pcall(ns.Hooks.Install)
-if not ok2 then fail("Hooks.Install errored: " .. tostring(installErr)) end
-io.write("OK Hooks.Install completed without error\n")
-
--- After install, the dropdown should have our wrapped generator and a
--- rootDescription was built (initializers registered on each child).
-local mg = mockDropdown.menuGenerator
-assert(type(mg) == "function", "menuGenerator should be a function, got " .. type(mg))
-io.write("OK menuGenerator is a function after Install\n")
-
--- ---- Exercise each child desc's initializer with a fresh button ----
--- buildWrappedGenerator was already called once during Install's
--- pre-existing-wrap path. To get the desc list, call SetupMenu(mg) again
--- — which is what our hook does — to rebuild the rootDescription and
--- run the wrapped generator (which calls blizzGen + registers initializers).
-local rootDesc = mockDropdown:SetupMenu(mg)
-assert(#rootDesc.children == 4, "expected 4 descs, got " .. #rootDesc.children)
-
-local function newRowButton()
-  return makeFrame("rowButton")
-end
-
--- Child 1: loadout row 201 (non-active)
-do
-  local btn = newRowButton()
+  local btn = makeFrame("pooledMenuButton")
   rootDesc.children[1]._initializers[1](btn, rootDesc.children[1], nil)
-  if not btn._tldX then fail("loadout row should have created an X button") end
-  if btn._tldX._shown ~= true then fail("loadout row X should be shown") end
-  if btn._tldX:GetNormalTexture()._desat ~= false then fail("non-active X should not be desaturated") end
-  io.write("OK loadout row (configID 201) creates a visible non-greyed X\n")
+
+  -- Must have called AttachUtilityButton with our button as parent.
+  local matched = nil
+  for _, call in ipairs(attachUtilityCalls) do
+    if call.parent == btn then matched = call; break end
+  end
+  if not matched then
+    fail("non-active loadout: AttachUtilityButton was not called with the pooled menuButton as parent")
+  end
+  if not matched.textureAsset or not matched.textureAsset:find("UI%-StopButton") then
+    fail("non-active loadout: AttachUtilityButton textureAsset should reference UI-StopButton, got "
+         .. tostring(matched.textureAsset))
+  end
+  -- Click handler should be wired (Shift-gated DeleteConfig).
+  local handlerForBtn = nil
+  for _, call in ipairs(clickHandlerCalls) do
+    if call.button == matched.button then handlerForBtn = call.handler; break end
+  end
+  if not handlerForBtn then
+    fail("non-active loadout: SetUtilityButtonClickHandler was not called on the X")
+  end
+  -- Tooltip should be set.
+  local tooltipForBtn = nil
+  for _, call in ipairs(tooltipCalls) do
+    if call.button == matched.button then tooltipForBtn = call.text; break end
+  end
+  if not tooltipForBtn then
+    fail("non-active loadout: SetUtilityButtonTooltipText was not called")
+  end
+  -- Active row must NOT be the path taken — locked-enabled state should not be false here.
+  for _, call in ipairs(lockedStateCalls) do
+    if call.button == matched.button and call.value == false then
+      fail("non-active loadout: must NOT lock the X to disabled (only the active row should)")
+    end
+  end
+  io.write("OK non-active loadout (201): X created via Attach, click handler + tooltip wired\n")
 end
+
+-- Reset trackers for the active-row test.
+local activeAttachCount = #attachUtilityCalls
+local activeLockedCount = #lockedStateCalls
 
 -- Child 2: active loadout 101
 do
-  local btn = newRowButton()
+  local btn = makeFrame("pooledMenuButton")
   rootDesc.children[2]._initializers[1](btn, rootDesc.children[2], nil)
-  if not btn._tldX then fail("active loadout row should have created an X button") end
-  if btn._tldX._shown ~= true then fail("active X should be shown") end
-  if btn._tldX:GetNormalTexture()._desat ~= true then fail("active X should be desaturated") end
-  io.write("OK active loadout row (configID 101) creates a desaturated X\n")
-end
 
--- Child 3: Starter Build (numeric, == STARTER_BUILD_TRAIT_CONFIG_ID)
-do
-  local btn = newRowButton()
-  rootDesc.children[3]._initializers[1](btn, rootDesc.children[3], nil)
-  if btn._tldX then fail("Starter Build row must NOT create an X (it is filtered as not-deletable)") end
-  io.write("OK Starter Build row (configID == STARTER_BUILD) produces no X\n")
-end
-
--- Child 4: sentinel (data = nil)
-do
-  local btn = newRowButton()
-  rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
-  if btn._tldX then fail("sentinel row must NOT create an X (data is not numeric)") end
-  io.write("OK sentinel row (data = nil) produces no X\n")
-end
-
--- ---- Marker-based orphan cleanup: child carries _tldOwned ----
-do
-  local btn = newRowButton()
-  local marked = CreateFrame("Button", nil, btn)
-  marked._tldOwned = true
-  marked:SetNormalTexture("Some/Other/Texture")  -- different texture, must still be caught by marker
-  marked:Show()
-  rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
-  if marked._shown ~= false then
-    fail("marker-cleanup: child with _tldOwned=true must be hidden regardless of texture path")
+  local matched = nil
+  for i = activeAttachCount + 1, #attachUtilityCalls do
+    if attachUtilityCalls[i].parent == btn then matched = attachUtilityCalls[i]; break end
   end
-  io.write("OK marker-cleanup: _tldOwned child hidden on non-loadout render\n")
+  if not matched then
+    fail("active loadout: AttachUtilityButton was not called with the pooled menuButton as parent")
+  end
+  -- Active row must be locked-disabled so the click does nothing and the
+  -- texture desaturates via MenuTemplates.SetHierarchyEnabled.
+  local locked = nil
+  for i = activeLockedCount + 1, #lockedStateCalls do
+    if lockedStateCalls[i].button == matched.button then locked = lockedStateCalls[i].value; break end
+  end
+  if locked ~= false then
+    fail("active loadout: must call SetUtilityButtonLockedEnabledState(x, false) to disable+desaturate, got "
+         .. tostring(locked))
+  end
+  io.write("OK active loadout (101): X created via Attach + locked to disabled (desaturates via hierarchy)\n")
 end
 
--- ---- Substring-match handles path-format variants ----
--- WoW may normalize the texture path returned by GetTexture vs what was
--- passed to SetNormalTexture (slash style, case, extension). The
--- substring "UI-StopButton" should match all reasonable variants.
+-- ---- Shift gate on click ----
 do
-  for _, variant in ipairs({
-    "Interface\\Buttons\\UI-StopButton",
-    "Interface/Buttons/UI-StopButton",
-    "interface/buttons/ui-stopbutton",  -- case difference (won't match — Lua patterns are case-sensitive)
-    "INTERFACE\\BUTTONS\\UI-StopButton",
-    "Interface\\Buttons\\UI-StopButton.blp",
-  }) do
-    local btn = newRowButton()
-    local orphan = CreateFrame("Button", nil, btn)
-    orphan:SetNormalTexture(variant)
-    orphan:Show()
-    rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
-    if variant:find("UI%-StopButton") then
-      -- Case-sensitive Lua pattern: only variants containing exact "UI-StopButton"
-      -- match. Lowercase variant won't — that's an acceptable trade-off for
-      -- simplicity. If we ever need case-insensitive, switch to lower-then-find.
-      if orphan._shown ~= false then
-        fail("substring-cleanup: orphan with path " .. variant .. " must be hidden")
+  -- Find a non-active click handler from the first call above.
+  local handler = nil
+  for _, call in ipairs(clickHandlerCalls) do
+    -- Skip the active-row handler if present.
+    local isActiveRow = false
+    for _, lockCall in ipairs(lockedStateCalls) do
+      if lockCall.button == call.button and lockCall.value == false then
+        isActiveRow = true; break
       end
     end
+    if not isActiveRow then handler = call.handler; break end
   end
-  io.write("OK substring-cleanup: orphan X buttons with various path formats hidden\n")
+  if not handler then fail("no non-active click handler available to test shift gate") end
+
+  local deleteCalls = {}
+  C_ClassTalents.DeleteConfig = function(id) table.insert(deleteCalls, id) end
+
+  -- Shift NOT down → no delete.
+  IsShiftKeyDown = function() return false end
+  handler()
+  if #deleteCalls ~= 0 then
+    fail("shift gate: DeleteConfig called with Shift not held (got " .. #deleteCalls .. " calls)")
+  end
+
+  -- Shift down → delete fires with the desc's configID.
+  IsShiftKeyDown = function() return true end
+  handler()
+  if #deleteCalls ~= 1 then
+    fail("shift gate: DeleteConfig should fire once when Shift is held, got " .. #deleteCalls)
+  end
+  if deleteCalls[1] ~= 201 then
+    fail("shift gate: DeleteConfig should receive configID 201, got " .. tostring(deleteCalls[1]))
+  end
+  io.write("OK shift gate: DeleteConfig blocked without Shift, fires with Shift on correct configID\n")
 end
 
--- ---- Orphan X cleanup: button has a prior orphan X attached ----
--- Simulates the user's actual Phase 8 bug: previous broken addon versions
--- attached unmarked X frames to Blizzard menu buttons. /reload doesn't
--- unload Blizzard_Menu's button pool, so the orphans persist. Our new
--- initializer must scan-by-texture and hide them.
+-- ---- No raw CreateFrame() with the pooled menuButton as parent ----
 do
-  local btn = newRowButton()
-  -- Pre-attach an "orphan" X from a previous broken session: same
-  -- texture, same parent, but NOT tracked via button._tldX.
-  local orphan = CreateFrame("Button", nil, btn)
-  orphan:SetSize(16, 16)
-  orphan:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
-  orphan:Show()
-  assert(orphan._shown == true, "orphan should start visible")
-  assert(#btn._children == 1 and btn._children[1] == orphan, "orphan should be a child of btn")
-
-  -- Now render a SENTINEL desc on this button. The initializer must scan
-  -- the children, find the orphan by texture, and hide it.
-  rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
-  if orphan._shown ~= false then
-    fail("orphan-cleanup: unmarked orphan X (with UI-StopButton texture) must be hidden when the button renders a sentinel row")
+  for _, call in ipairs(createFrameCalls) do
+    -- The pooledMenuButton stubs we created have ._name == "pooledMenuButton".
+    if call.parent and call.parent._name == "pooledMenuButton" then
+      fail("anti-pattern: CreateFrame(" .. tostring(call.kind) .. ", ...) was called with the pooled menuButton as parent")
+    end
   end
-  io.write("OK orphan-cleanup: unmarked orphan X hidden on sentinel render\n")
-
-  -- And render a LOADOUT on the same button: orphan still hidden, new X created.
-  orphan:Show()  -- re-show the orphan to test the loadout path
-  rootDesc.children[1]._initializers[1](btn, rootDesc.children[1], nil)
-  if orphan._shown ~= false then
-    fail("orphan-cleanup: orphan must be hidden even when rendering a loadout (we replace it with our cached one)")
-  end
-  if not btn._tldX or btn._tldX._shown ~= true then
-    fail("orphan-cleanup: new cached X must still be created on loadout render")
-  end
-  io.write("OK orphan-cleanup: orphan hidden + new cached X shown on loadout render\n")
-end
-
--- ---- Button-pool reuse: button that rendered a loadout now renders a sentinel ----
--- This is the failure mode the user reported: X appearing on Import/Share/etc.
--- Same button reused across menu opens — cached X must be hidden when the
--- new desc is a non-loadout row.
-do
-  local btn = newRowButton()
-  rootDesc.children[1]._initializers[1](btn, rootDesc.children[1], nil)
-  assert(btn._tldX, "expected X after rendering loadout")
-  assert(btn._tldX._shown == true, "expected X shown after rendering loadout")
-
-  -- Now reuse the SAME button for the sentinel row.
-  rootDesc.children[4]._initializers[1](btn, rootDesc.children[4], nil)
-  if btn._tldX._shown ~= false then
-    fail("button-pool reuse: X must be HIDDEN when same button is reused for a sentinel row, got _shown=" .. tostring(btn._tldX._shown))
-  end
-  io.write("OK button-pool reuse: cached X hidden when sentinel reuses a loadout-button\n")
-
-  -- And reusing for Starter Build also hides
-  rootDesc.children[3]._initializers[1](btn, rootDesc.children[3], nil)
-  if btn._tldX._shown ~= false then
-    fail("button-pool reuse: X must be HIDDEN when same button is reused for Starter Build")
-  end
-  io.write("OK button-pool reuse: cached X hidden when Starter Build reuses a loadout-button\n")
-
-  -- And reusing back for a loadout SHOWS it again
-  rootDesc.children[2]._initializers[1](btn, rootDesc.children[2], nil)
-  if btn._tldX._shown ~= true then
-    fail("button-pool reuse: X must be SHOWN when sentinel-rendered button is reused for a loadout")
-  end
-  io.write("OK button-pool reuse: cached X re-shown when loadout reuses a sentinel-button\n")
-end
-
--- ---- Sanity: re-invoking the hook does not re-wrap (no recursion) ----
-do
-  local before = mockDropdown.menuGenerator
-  local ok3, hookErr = pcall(function() mockLoadSystem:UpdateSelectionOptions() end)
-  if not ok3 then fail("second UpdateSelectionOptions errored: " .. tostring(hookErr)) end
-  -- Blizzard's stub UpdateSelectionOptions installs a fresh blizzGen, so
-  -- our hook wraps it freshly; that's expected. What we don't want is a
-  -- runaway (e.g., wrapping our wrapper, infinite indirection).
-  assert(type(mockDropdown.menuGenerator) == "function", "menuGenerator must remain a function")
-  io.write("OK second UpdateSelectionOptions invocation safe (no recursion / no field-on-function indexing)\n")
+  io.write("OK no insecure-parent CreateFrame on pooled menuButtons\n")
 end
 
 io.write("--- ALL CHECKS PASSED ---\n")

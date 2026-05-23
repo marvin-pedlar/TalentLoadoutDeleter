@@ -1,5 +1,13 @@
 -- TalentLoadoutDeleter / Hooks.lua
 -- Blizzard talent UI integration: Manage button + inline [X].
+--
+-- Inline X uses Menu.ModifyMenu("MENU_CLASS_TALENT_PROFILE", cb) +
+-- MenuTemplates.Attach* helpers exclusively. The compositor cleans every
+-- attachment on menu close, so there are no orphans across pool reuse and
+-- no taint leaks onto the session-wide menu button pool. Raw key writes
+-- (button._foo = x), iteration of pooled children (button:GetChildren()),
+-- or CreateFrame with a pooled parent would all taint the pool — see
+-- addon-dev-learning.md B1 for the incident this design avoids.
 
 local _, ns = ...
 ns = ns or {}
@@ -7,10 +15,9 @@ ns = ns or {}
 local Hooks = {}
 local installed = false
 
--- Weak-keyed set of functions we've produced as menuGenerator wrappers.
--- Lua functions are NOT tables — `wrapped._tld_wrapped = true` and the
--- corresponding read would both error. Using a side table avoids that.
-local isOurWrapper = setmetatable({}, { __mode = "k" })
+local STOP_TEXTURE = "Interface\\Buttons\\UI-StopButton"
+local TIP_DELETE = "Shift-click to delete this loadout."
+local TIP_ACTIVE = "Cannot delete the active loadout — switch first."
 
 local function createManageButton(parent)
   local button = CreateFrame("Button", "TalentLoadoutDeleterManageButton",
@@ -50,6 +57,44 @@ local function anchorManageButton(button)
   end
 end
 
+local function isDeletableLoadoutData(data)
+  if type(data) ~= "number" then return false end
+  local starter = Constants and Constants.TraitConsts
+    and Constants.TraitConsts.STARTER_BUILD_TRAIT_CONFIG_ID
+  if starter ~= nil and data == starter then return false end
+  return true
+end
+
+local function decorateLoadoutMenu(ownerRegion, rootDescription, contextData)
+  if not (rootDescription and rootDescription.EnumerateElementDescriptions) then return end
+  for _, desc in rootDescription:EnumerateElementDescriptions() do
+    local configID = desc:GetData()
+    if isDeletableLoadoutData(configID) then
+      desc:AddInitializer(function(menuButton, description, menu)
+        local activeID = C_ClassTalents and C_ClassTalents.GetActiveConfigID
+          and C_ClassTalents.GetActiveConfigID()
+        local isActive = (configID == activeID)
+
+        local x = MenuTemplates.AttachUtilityButton(menuButton, STOP_TEXTURE, 16, 16)
+
+        if isActive then
+          -- Lock disabled → MenuTemplates.SetHierarchyEnabled desaturates
+          -- the texture automatically (see MenuTemplates_base.lua line ~209).
+          MenuTemplates.SetUtilityButtonLockedEnabledState(x, false)
+          MenuTemplates.SetUtilityButtonTooltipText(x, TIP_ACTIVE)
+        else
+          MenuTemplates.SetUtilityButtonTooltipText(x, TIP_DELETE)
+          MenuTemplates.SetUtilityButtonClickHandler(x, function()
+            if not IsShiftKeyDown() then return end
+            C_ClassTalents.DeleteConfig(configID)
+            if menu and menu.Close then menu:Close() end
+          end)
+        end
+      end)
+    end
+  end
+end
+
 function Hooks.Install()
   if installed then return end
   if not (PlayerSpellsFrame and PlayerSpellsFrame.TalentsFrame) then return end
@@ -64,133 +109,13 @@ function Hooks.Install()
   end)
   anchorManageButton(button)
 
-  -- Inline [X] injection. Blizzard's Mixin() copies the mixin's methods
-  -- onto each frame instance, so hooking the global mixin doesn't
-  -- intercept calls on the existing LoadSystem instance. We must hook
-  -- the instance directly. Also: SetSelectionOptions may have run
-  -- before our addon loaded, so wrap any pre-existing menuGenerator
-  -- immediately without triggering UpdateSelectionOptions (which would
-  -- error if possibleSelections happens to be nil).
-  local LoadSystem = PlayerSpellsFrame.TalentsFrame.LoadSystem
-
-  local function buildWrappedGenerator(origGenerator)
-    if isOurWrapper[origGenerator] then return origGenerator end
-    local wrapped
-    wrapped = function(dropdown, rootDescription)
-      origGenerator(dropdown, rootDescription)
-
-      for _, desc in rootDescription:EnumerateElementDescriptions() do
-        local configID = desc:GetData()
-        -- Add an initializer for EVERY desc, not just loadout rows.
-        -- The menu button-widget pool reuses buttons across renders, so a
-        -- button that rendered a loadout last time may render a sentinel
-        -- this time — and our cached `button._tldX` would still be
-        -- visible from the prior render. The initializer below hides the
-        -- cached X on non-loadout rows.
-        desc:AddInitializer(function(menuButton, description, menu)
-          local STARTER_BUILD = Constants and Constants.TraitConsts
-            and Constants.TraitConsts.STARTER_BUILD_TRAIT_CONFIG_ID
-          local isLoadout = type(configID) == "number"
-            and configID ~= STARTER_BUILD
-
-          -- Hide ALL prior X buttons attached to this menu button. Blizzard
-          -- pools menu buttons across renders (and across /reload — the
-          -- Blizzard_Menu addon stays loaded), so orphans from earlier
-          -- code paths or earlier addon versions can persist. Two signals:
-          --   1) child._tldOwned (set by our current code on every X we
-          --      create — exact, reliable).
-          --   2) NormalTexture path contains "UI-StopButton" (catches
-          --      unmarked orphans from older addon versions, robust
-          --      against in-game path normalization that may differ from
-          --      the literal we passed to SetNormalTexture).
-          local children = { menuButton:GetChildren() }
-          for _, child in ipairs(children) do
-            local shouldHide = child._tldOwned == true
-            if not shouldHide then
-              local getTex = child.GetNormalTexture
-              if getTex then
-                local tex = getTex(child)
-                local path = tex and tex.GetTexture and tex:GetTexture()
-                if type(path) == "string" and path:find("UI%-StopButton") then
-                  shouldHide = true
-                end
-              end
-            end
-            if shouldHide then child:Hide() end
-          end
-          local x = menuButton._tldX
-
-          if not isLoadout then
-            return
-          end
-
-          local activeID = C_ClassTalents.GetActiveConfigID()
-          local isActive = (configID == activeID)
-
-          if not x then
-            x = CreateFrame("Button", nil, menuButton)
-            x:SetSize(16, 16)
-            x:SetNormalTexture("Interface\\Buttons\\UI-StopButton")
-            x._tldOwned = true  -- reliable signal for the orphan scan above
-            menuButton._tldX = x
-          end
-          x:ClearAllPoints()
-          x:SetPoint("RIGHT", menuButton, "RIGHT", -22, 0)
-          local tex = x:GetNormalTexture()
-
-          if isActive then
-            tex:SetDesaturated(true)
-            tex:SetVertexColor(0.5, 0.5, 0.5)
-            x:SetScript("OnEnter", function(self)
-              GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-              GameTooltip:SetText("Cannot delete the active loadout — switch first.")
-              GameTooltip:Show()
-            end)
-            x:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            x:SetScript("OnClick", nil)
-          else
-            tex:SetDesaturated(false)
-            tex:SetVertexColor(1, 1, 1)
-            x:SetScript("OnEnter", function(self)
-              GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-              GameTooltip:SetText("Shift-click to delete this loadout.")
-              GameTooltip:Show()
-            end)
-            x:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            x:SetScript("OnClick", function(self)
-              if not IsShiftKeyDown() then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetText("Hold Shift and click to delete.")
-                GameTooltip:Show()
-                return
-              end
-              C_ClassTalents.DeleteConfig(configID)
-              menu:Close()
-            end)
-          end
-          x:Show()
-        end)
-      end
-    end
-    isOurWrapper[wrapped] = true
-    return wrapped
-  end
-
-  -- 1) Hook the instance method for any future UpdateSelectionOptions calls
-  --    (e.g. after TRAIT_CONFIG_LIST_UPDATED fires).
-  hooksecurefunc(LoadSystem, "UpdateSelectionOptions", function(self)
-    local orig = self.Dropdown.menuGenerator
-    if not orig or isOurWrapper[orig] then return end
-    self.Dropdown:SetupMenu(buildWrappedGenerator(orig))
-  end)
-
-  -- 2) Wrap any pre-existing menuGenerator that Blizzard set before our
-  --    hook installed (common case: SetSelectionOptions ran during the
-  --    talents frame's initial setup before our ADDON_LOADED fired).
-  local dropdown = LoadSystem.Dropdown
-  if dropdown and dropdown.menuGenerator and not isOurWrapper[dropdown.menuGenerator] then
-    dropdown:SetupMenu(buildWrappedGenerator(dropdown.menuGenerator))
-  end
+  -- Inline [X] via the Menu.ModifyMenu compositor-aware path. Blizzard
+  -- tags the loadout dropdown's menu at Blizzard_ClassTalentsFrame.lua
+  -- line ~475: self.LoadSystem:SetMenuTag("MENU_CLASS_TALENT_PROFILE").
+  -- The callback fires immediately if Blizzard already generated the
+  -- menu, AND on every future regeneration (TRAIT_CONFIG_LIST_UPDATED,
+  -- spec change, new loadout created, etc).
+  Menu.ModifyMenu("MENU_CLASS_TALENT_PROFILE", decorateLoadoutMenu)
 end
 
 ns.Hooks = Hooks
